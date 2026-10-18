@@ -8,9 +8,50 @@
 
 ---
 
+## 直接下载使用（推荐）
+
+不想编译的话，去 **[Releases](https://github.com/awa48666/game-fps-monitor/releases/latest)** 下载：
+
+```
+GameFPS-v1.0.0-win-x64.zip    约 190 MB
+```
+
+解压后双击 `GameFPS.exe` 即可。**包内已内置 .NET 10 与 Electron，不需要额外安装任何运行时。**
+
+**系统要求**
+
+| 项目 | 要求 |
+|---|---|
+| 系统 | Windows 10 / 11 64 位 |
+| 权限 | 管理员（ETW 内核事件采集必需，每次启动会弹一次 UAC） |
+| 显卡 | 任意（GPU 频率/功耗/温度仅 NVIDIA 可用，走 NVML） |
+| 运行时 | 无需安装（已自包含） |
+
+---
+
+## 从源码构建
+
+需要 .NET 10 SDK、Node.js 与 pnpm。
+
+```powershell
+# 备份并安装前端依赖
+cd app
+npm install          # 或 pnpm install
+
+# 打包（默认框架依赖，体积小；加 -SelfContained 则内置运行时）
+cd ..
+.\publish.ps1 -SelfContained
+
+# 产物在 dist\GameFPS\，双击 GameFPS.exe 运行
+```
+
+`publish.ps1` 会做四件事：publish C# 后端 → 拷贝前端 → 拷贝 Electron 运行时 → 裁剪语言包。
+
+---
+
 ## 一、快速开始
 
-**直接用已打包好的版本：**
+**用已打包好的版本：**
 
 ```
 dist\GameFPS\GameFPS.exe     ← 双击运行，会弹一次 UAC（采集需要管理员权限）
