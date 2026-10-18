@@ -263,10 +263,14 @@ public sealed class OverlayForm : Form
 
     private List<Row> BuildRows(MonitorSnapshot s)
     {
+        // 样式2 = 横排单行；样式1 = 竖排单列；样式3 = 竖排双列（每行两项）
         return _settings.OverlayStyle == 2
             ? BuildRowsHorizontal(s)
             : BuildRowsVertical(s);
     }
+
+    /// <summary>是否双列布局（样式3）。</summary>
+    private bool IsTwoColumn => _settings.OverlayStyle == 3;
 
     /// <summary>样式2：所有数值压成一行横排，最省屏幕空间。</summary>
     private List<Row> BuildRowsHorizontal(MonitorSnapshot s)
@@ -386,6 +390,23 @@ public sealed class OverlayForm : Form
         return gpu;
     }
 
+    /// <summary>
+    /// 双列布局下实际会占多少行：标题行独占一行，其余每两项并成一行。
+    /// </summary>
+    private static int CountVisualLines(List<Row> rows)
+    {
+        int lines = 0;
+        int i = 0;
+        while (i < rows.Count)
+        {
+            if (rows[i].IsTitle) { lines++; i++; continue; }
+            // 看下一项能不能并到同一行
+            if (i + 1 < rows.Count && !rows[i + 1].IsTitle) { lines++; i += 2; }
+            else { lines++; i++; }
+        }
+        return lines;
+    }
+
     private static string Fps(double v) => v <= 0.05 ? "--" : v.ToString("0");
 
     private void Render(MonitorSnapshot s)
@@ -425,8 +446,17 @@ public sealed class OverlayForm : Form
         if (chartH > 0) chartsTotal += chartGap + chartH;
         if (ftChartH > 0) chartsTotal += chartGap + ftChartH;
 
-        int width = (int)Math.Ceiling(pad * 2 + labelW + gap + valueW);
-        int height = (int)Math.Ceiling(pad * 2 + lineH * rows.Count + chartsTotal);
+        // 双列：每列宽度相同，列之间留一点间距；标题行仍独占整行
+        bool twoCol = IsTwoColumn;
+        float colGap = 18f * scale;
+        float cellW = labelW + gap + valueW;
+        int colsUsed = twoCol ? 2 : 1;
+
+        float contentW = cellW * colsUsed + (colsUsed - 1) * colGap;
+        int visualLines = twoCol ? CountVisualLines(rows) : rows.Count;
+
+        int width = (int)Math.Ceiling(pad * 2 + contentW);
+        int height = (int)Math.Ceiling(pad * 2 + lineH * visualLines + chartsTotal);
 
         // 画了曲线就给足宽度，否则曲线会被挤成一条竖线
         if (chartsTotal > 0) width = Math.Max(width, (int)Math.Ceiling(pad * 2 + 130 * scale));
@@ -454,20 +484,50 @@ public sealed class OverlayForm : Form
             using var shadow = new SolidBrush(Color.FromArgb(200, 0, 0, 0));
 
             float y = pad;
-            foreach (var r in rows)
+
+            // 每格画一组 label + value
+            void DrawCell(Row r, float x, float top)
             {
                 if (r.Label.Length > 0)
                 {
-                    g.DrawString(r.Label, normalFont, shadow, pad + 1f, y + 1f);   // 描影，保证亮背景上可读
-                    g.DrawString(r.Label, normalFont, labelBrush, pad, y);
+                    g.DrawString(r.Label, normalFont, shadow, x + 1f, top + 1f);   // 描影，保证亮背景上可读
+                    g.DrawString(r.Label, normalFont, labelBrush, x, top);
                 }
-                float vx = pad + labelW + gap;
-                g.DrawString(r.Value, normalFont, shadow, vx + 1f, y + 1f);
-                g.DrawString(r.Value, normalFont, valueBrush, vx, y);
+                float vx = x + labelW + gap;
+                g.DrawString(r.Value, normalFont, shadow, vx + 1f, top + 1f);
+                g.DrawString(r.Value, normalFont, valueBrush, vx, top);
+            }
+
+            int i = 0;
+            while (i < rows.Count)
+            {
+                var r = rows[i];
+
+                // 标题（游戏名）永远独占一整行
+                if (r.IsTitle)
+                {
+                    DrawCell(r, pad, y);
+                    y += lineH;
+                    i++;
+                    continue;
+                }
+
+                DrawCell(r, pad, y);
+
+                // 双列且下一个不是标题时，同一行右侧再放一项
+                if (twoCol && i + 1 < rows.Count && !rows[i + 1].IsTitle)
+                {
+                    DrawCell(rows[i + 1], pad + cellW + colGap, y);
+                    i += 2;
+                }
+                else
+                {
+                    i++;
+                }
                 y += lineH;
             }
 
-            float chartY = pad + lineH * rows.Count + chartGap;
+            float chartY = pad + lineH * visualLines + chartGap;
 
             if (chartH > 0)
             {
