@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'self'; connect-src ws://127.0.0.1:* http://127.0.0.1:*; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:">
+<title>游戏帧率实时监测</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="titlebar">
+  <div class="brand">
+    <span class="brand-dot"></span>
+    <span class="brand-name">游戏帧率实时监测</span>
+  </div>
+  <div class="conn">
+    <span id="conn-dot" class="conn-dot off"></span>
+    <span id="conn-text">未连接</span>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button class="tab active" data-page="monitor">实时监控</button>
+  <button class="tab" data-page="history">历史记录</button>
+  <button class="tab" data-page="settings">设置</button>
+</nav>
+
+<main>
+
+  <!-- ================= 监控页 ================= -->
+  <section id="page-monitor" class="page active">
+
+    <div class="game-bar">
+      <div class="game-info">
+        <span class="label">当前监测进程</span>
+        <span id="game-name" class="game-name">等待游戏运行…</span>
+        <span id="game-pid" class="game-pid"></span>
+      </div>
+
+      <div class="target-picker">
+        <span class="label">监测目标</span>
+        <select id="monitor-target-select" class="target-select" title="选择要监测的进程"></select>
+        <button id="btn-refresh-targets" class="mini" title="重新扫描正在渲染的进程">刷新</button>
+      </div>
+
+      <div class="badges">
+        <span id="badge-admin" class="badge">管理员</span>
+        <span id="badge-event" class="badge">ETW 无注入</span>
+        <span id="badge-manual" class="badge hidden">锁定：—</span>
+      </div>
+    </div>
+
+    <div class="grid-top">
+      <div class="card fps-card">
+        <div class="fps-value" id="fps">--</div>
+        <div class="fps-unit">FPS</div>
+        <div class="fps-sub">
+          <span>帧时间 <b id="frame-time">--</b> ms</span>
+          <span id="session-info" class="session-info"></span>
+        </div>
+      </div>
+      <div class="card stat-card">
+        <div class="stat"><span>1% Low</span><b id="low1">--</b></div>
+        <div class="stat"><span>0.1% Low</span><b id="low01">--</b></div>
+        <div class="stat"><span>最慢帧</span><b id="max-ft">--</b></div>
+        <div class="stat"><span>累计帧数</span><b id="total-frames">--</b></div>
+      </div>
+    </div>
+
+    <div class="grid-hw">
+      <div class="card hw-card">
+        <div class="hw-head"><span>CPU</span><b id="cpu-val">--%</b></div>
+        <div class="bar"><i id="cpu-bar" style="width:0%"></i></div>
+        <div class="hw-sub" id="cpu-sub">--</div>
+      </div>
+      <div class="card hw-card">
+        <div class="hw-head"><span>GPU</span><b id="gpu-val">--%</b></div>
+        <div class="bar"><i id="gpu-bar" style="width:0%"></i></div>
+        <div class="hw-sub" id="gpu-sub">--</div>
+      </div>
+      <div class="card hw-card">
+        <div class="hw-head"><span>显存</span><b id="vram-val">-- MB</b></div>
+        <div class="bar"><i id="vram-bar" style="width:0%"></i></div>
+      </div>
+      <div class="card hw-card">
+        <div class="hw-head"><span>内存</span><b id="mem-val">--%</b></div>
+        <div class="bar"><i id="mem-bar" style="width:0%"></i></div>
+      </div>
+    </div>
+
+    <div class="card chart-card">
+      <div class="chart-head">
+        <span>帧率曲线（逐帧）</span>
+        <span class="chart-legend small">
+          <i class="lg lg-fps"></i>帧率
+          <i class="lg lg-low1"></i>1% Low
+          <i class="lg lg-low01"></i>0.1% Low
+        </span>
+        <span id="chart-info" class="muted">等待数据…</span>
+      </div>
+      <canvas id="chart"></canvas>
+    </div>
+
+    <div class="card chart-card">
+      <div class="chart-head">
+        <span>帧时间曲线（逐帧）</span>
+        <span class="chart-legend small">
+          <i class="lg lg-ft"></i>帧时间
+          <i class="lg lg-ftavg"></i>平均
+        </span>
+        <span id="ft-chart-info" class="muted">等待数据…</span>
+      </div>
+      <canvas id="ft-chart"></canvas>
+    </div>
+
+    <div id="error-box" class="error hidden"></div>
+  </section>
+
+  <!-- ================= 历史记录 ================= -->
+  <section id="page-history" class="page">
+
+    <div class="card">
+      <div class="card-head">
+        <h3>游戏帧率记录</h3>
+        <div class="card-head-actions">
+          <span id="history-count" class="muted small"></span>
+          <button id="btn-refresh-history" class="mini">刷新</button>
+          <button id="btn-open-records" class="mini">打开记录文件夹</button>
+        </div>
+      </div>
+
+      <!-- 各场对比曲线 -->
+      <div id="history-chart-wrap" class="hidden">
+        <div class="chart-legend">
+          <span class="lg lg-avg">平均 FPS</span>
+          <span class="lg lg-low1">1% Low</span>
+          <span class="lg lg-low01">0.1% Low</span>
+          <span class="muted small" id="history-chart-note"></span>
+        </div>
+        <canvas id="history-chart"></canvas>
+      </div>
+
+      <!-- 记录卡片 -->
+      <div id="history-list" class="history-list">
+        <div class="muted small">暂无记录 —— 玩一局游戏，退出后会自动出现在这里。</div>
+      </div>
+    </div>
+
+    <div id="history-detail" class="card hidden">
+      <div class="card-head">
+        <h3 id="detail-title">记录详情</h3>
+        <button id="btn-close-detail" class="mini">关闭</button>
+      </div>
+      <div id="detail-chart-wrap" class="hidden">
+        <canvas id="detail-chart"></canvas>
+        <div class="muted small" id="detail-chart-note"></div>
+      </div>
+      <div id="detail-body" class="detail-grid"></div>
+    </div>
+
+  </section>
+
+  <!-- ================= 设置页 ================= -->
+  <section id="page-settings" class="page">
+
+    <div class="card">
+      <h3>游戏内悬浮窗</h3>
+      <div class="row inline">
+        <label class="toggle">
+          <input type="checkbox" id="s-overlayEnabled">
+          <span>启用悬浮窗</span>
+        </label>
+        <span class="gap"></span>
+        <span>样式</span>
+        <select id="s-overlayStyle" class="text">
+          <option value="1">样式1（竖排）</option>
+          <option value="2">样式2（横排）</option>
+        </select>
+        <button id="btn-drag-overlay" class="mini">调整位置</button>
+      </div>
+      <label class="row toggle">
+        <input type="checkbox" id="s-autoShowOnGame">
+        <span>仅在检测到游戏时显示</span>
+      </label>
+      <p class="muted small" id="drag-hint">点「调整位置」后，直接拖动屏幕上的悬浮窗到想要的地方，拖完再点一次结束。</p>
+
+      <h4>显示项</h4>
+      <div class="checks">
+        <label><input type="checkbox" id="s-showGameName"><span>游戏名</span></label>
+        <label><input type="checkbox" id="s-showFps"><span>FPS</span></label>
+        <label><input type="checkbox" id="s-showFrameTime"><span>帧时间</span></label>
+        <label><input type="checkbox" id="s-showLow1"><span>1% Low</span></label>
+        <label><input type="checkbox" id="s-showLow01"><span>0.1% Low</span></label>
+        <label><input type="checkbox" id="s-showCpu"><span>CPU</span></label>
+        <label><input type="checkbox" id="s-showGpu"><span>GPU</span></label>
+        <label><input type="checkbox" id="s-showGpuMemory"><span>显存</span></label>
+        <label><input type="checkbox" id="s-showMemory"><span>内存</span></label>
+        <label><input type="checkbox" id="s-showCpuFrequency"><span>CPU 频率</span></label>
+        <label><input type="checkbox" id="s-showGpuFrequency"><span>GPU 频率</span></label>
+        <label><input type="checkbox" id="s-showCpuPower"><span>CPU 功耗</span></label>
+        <label><input type="checkbox" id="s-showGpuPower"><span>GPU 功耗</span></label>
+        <label><input type="checkbox" id="s-showCpuTemperature"><span>CPU 温度</span></label>
+        <label><input type="checkbox" id="s-showGpuTemperature"><span>GPU 温度</span></label>
+        <label><input type="checkbox" id="s-showVramTemperature"><span>显存温度</span></label>
+        <label><input type="checkbox" id="s-showPCore"><span>大核</span></label>
+        <label><input type="checkbox" id="s-showECore"><span>小核</span></label>
+      </div>
+
+      <h4>悬浮窗曲线</h4>
+      <div class="checks">
+        <label><input type="checkbox" id="s-showOverlayChart"><span>帧率曲线</span></label>
+        <label><input type="checkbox" id="s-showOverlayLow1"><span>1% Low 线</span></label>
+        <label><input type="checkbox" id="s-showOverlayLow01"><span>0.1% Low 线</span></label>
+        <label><input type="checkbox" id="s-showOverlayFrameTime"><span>帧时间曲线</span></label>
+      </div>
+      <label class="row">
+        <span>曲线高度</span>
+        <input type="range" id="s-overlayChartHeight" min="16" max="120" step="4">
+        <b id="s-overlayChartHeight-val" class="mono"></b>
+      </label>
+    </div>
+
+    <div class="card">
+      <h3>位置与外观</h3>
+      <div class="row">
+        <span>位置</span>
+        <input type="number" id="s-x" class="num" min="0" step="1">
+        <input type="number" id="s-y" class="num" min="0" step="1">
+        <div class="presets">
+          <button class="mini" data-pos="lt">左上</button>
+          <button class="mini" data-pos="rt">右上</button>
+          <button class="mini" data-pos="lb">左下</button>
+          <button class="mini" data-pos="rb">右下</button>
+        </div>
+      </div>
+      <label class="row">
+        <span>缩放</span>
+        <input type="range" id="s-scale" min="0.6" max="2.4" step="0.05">
+        <b id="s-scale-val" class="mono"></b>
+      </label>
+      <label class="row">
+        <span>背景不透明度</span>
+        <input type="range" id="s-backOpacity" min="0" max="255" step="5">
+        <b id="s-backOpacity-val" class="mono"></b>
+      </label>
+      <label class="row">
+        <span>圆角</span>
+        <input type="range" id="s-cornerRadius" min="0" max="24" step="1">
+        <b id="s-cornerRadius-val" class="mono"></b>
+      </label>
+      <label class="row">
+        <span>字体</span>
+        <input type="text" id="s-fontFamily" class="text">
+      </label>
+      <label class="row">
+        <span>数值颜色</span>
+        <input type="color" id="s-textColor">
+        <span>标签颜色</span>
+        <input type="color" id="s-labelColor">
+        <span>背景颜色</span>
+        <input type="color" id="s-backColor">
+      </label>
+    </div>
+
+    <div class="card">
+      <h3>热键</h3>
+      <label class="row">
+        <span>显示/隐藏悬浮窗</span>
+        <input type="text" id="s-hotkeyToggleOverlay" class="text mono hotkey-input"
+               placeholder="点击后按下组合键" readonly>
+      </label>
+      <label class="row">
+        <span>打开主界面</span>
+        <input type="text" id="s-hotkeyOpenMain" class="text mono hotkey-input"
+               placeholder="点击后按下组合键" readonly>
+      </label>
+      <p class="muted small">
+        点输入框后直接按下想用的组合键即可录入；按 <code>Esc</code> 取消。
+        支持字母、数字、<code>F1</code>~<code>F24</code>，可搭配 <code>Ctrl</code> / <code>Alt</code> / <code>Shift</code> / <code>Win</code>。
+      </p>
+    </div>
+
+    <div class="card">
+      <h3>游戏记录</h3>
+      <label class="row toggle">
+        <input type="checkbox" id="s-recordSessions">
+        <span>游戏退出时自动保存帧率记录</span>
+      </label>
+      <label class="row toggle">
+        <input type="checkbox" id="s-writeFrameCsv">
+        <span>同时写出逐帧 CSV 到 records\csv\</span>
+      </label>
+      <label class="row">
+        <span>空闲兜底超时</span>
+        <input type="number" id="s-sessionIdleSeconds" class="num" min="0" max="600" step="5">
+        <span class="muted small">秒（0 = 关闭，只认进程退出）</span>
+      </label>
+      <label class="row">
+        <span>历史最多保留</span>
+        <input type="number" id="s-maxSessionsInHistory" class="num" min="20" max="5000" step="20">
+        <span class="muted small">条</span>
+      </label>
+      <p class="muted small">改完点下面的「保存设置」生效。</p>
+    </div>
+
+    <div class="actions">
+      <span class="muted small">所有改动即时生效，无需保存</span>
+      <button id="btn-reset" class="ghost">恢复默认</button>
+      <span id="save-hint" class="muted"></span>
+    </div>
+  </section>
+
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>

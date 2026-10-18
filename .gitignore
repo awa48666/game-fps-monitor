@@ -1,0 +1,49 @@
+# ===== .NET 编译产物 =====
+bin/
+obj/
+*.user
+*.suo
+*.pdb
+*.cache
+
+# ===== Node / Electron =====
+node_modules/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.electron/
+
+# ===== 发布产物（体积大，走 Releases 分发）=====
+dist/
+publish/
+*.exe
+*.dll
+*.nupkg
+*.zip
+
+# ===== 运行时数据 =====
+# 帧率记录、逐帧 CSV、诊断日志都属于本机运行结果，不入库
+records/
+session-debug.log
+hotkey.log
+electron.log
+*.log
+
+# ===== 本机设置 =====
+settings.json
+
+# ===== 备份 / 截图临时文件 =====
+backup/
+*.bak
+docs/shot-*.png
+
+# ===== IDE =====
+.vs/
+.idea/
+.vscode/
+*.swp
+
+# ===== 系统 =====
+Thumbs.db
+Desktop.ini
+.DS_Store

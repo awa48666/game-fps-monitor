@@ -1,0 +1,14 @@
+{
+  "name": "gamefps-monitor-ui",
+  "version": "1.0.0",
+  "description": "游戏帧率实时监测 - 前端界面",
+  "main": "main.js",
+  "license": "MIT",
+  "type": "commonjs",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^44.8.0"
+  }
+}

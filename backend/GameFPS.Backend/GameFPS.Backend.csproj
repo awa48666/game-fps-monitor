@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>GameFPS</AssemblyName>
+    <RootNamespace>GameFPS.Backend</RootNamespace>
+    <Version>1.0.0</Version>
+    <Product>游戏帧率实时监测</Product>
+    <AssemblyTitle>GameFPS 游戏帧率监测</AssemblyTitle>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\GameFPS.Core\GameFPS.Core.csproj" />
+  </ItemGroup>
+
+</Project>
