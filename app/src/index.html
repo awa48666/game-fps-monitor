@@ -185,17 +185,12 @@
       </label>
       <p class="muted small" id="drag-hint">点「调整位置」后，直接拖动屏幕上的悬浮窗到想要的地方，拖完再点一次结束。</p>
 
-      <h4>显示项</h4>
+      <h4>显示项（可拖动或用 ▲▼ 调整上下顺序）</h4>
+      <div class="order-list" id="order-list"></div>
+
+      <h4>行内附加信息</h4>
+      <p class="muted small" style="margin:-4px 0 8px">这些内容会接在对应行末尾，不影响行顺序</p>
       <div class="checks">
-        <label><input type="checkbox" id="s-showGameName"><span>游戏名</span></label>
-        <label><input type="checkbox" id="s-showFps"><span>FPS</span></label>
-        <label><input type="checkbox" id="s-showFrameTime"><span>帧时间</span></label>
-        <label><input type="checkbox" id="s-showLow1"><span>1% Low</span></label>
-        <label><input type="checkbox" id="s-showLow01"><span>0.1% Low</span></label>
-        <label><input type="checkbox" id="s-showCpu"><span>CPU</span></label>
-        <label><input type="checkbox" id="s-showGpu"><span>GPU</span></label>
-        <label><input type="checkbox" id="s-showGpuMemory"><span>显存</span></label>
-        <label><input type="checkbox" id="s-showMemory"><span>内存</span></label>
         <label><input type="checkbox" id="s-showCpuFrequency"><span>CPU 频率</span></label>
         <label><input type="checkbox" id="s-showGpuFrequency"><span>GPU 频率</span></label>
         <label><input type="checkbox" id="s-showCpuPower"><span>CPU 功耗</span></label>
@@ -203,8 +198,6 @@
         <label><input type="checkbox" id="s-showCpuTemperature"><span>CPU 温度</span></label>
         <label><input type="checkbox" id="s-showGpuTemperature"><span>GPU 温度</span></label>
         <label><input type="checkbox" id="s-showVramTemperature"><span>显存温度</span></label>
-        <label><input type="checkbox" id="s-showPCore"><span>大核</span></label>
-        <label><input type="checkbox" id="s-showECore"><span>小核</span></label>
       </div>
 
       <h4>悬浮窗曲线</h4>

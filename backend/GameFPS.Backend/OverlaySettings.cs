@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -76,6 +77,12 @@ public sealed class OverlaySettings
 
     /// <summary>迷你曲线高度（像素，会随缩放一起放大）。</summary>
     public int OverlayChartHeight { get; set; } = 40;
+
+    /// <summary>
+    /// 竖排样式下各显示项的顺序，存的是键名（如 "fps"、"cpu"、"frametime"）。
+    /// 空列表 = 用内置默认顺序。用户手动调整顺序后写入这里。
+    /// </summary>
+    public List<string> OverlayOrder { get; set; } = new();
 
     // ---- 热键 ----
     /// <summary>显示/隐藏悬浮窗的热键，如 F9 / Ctrl+Alt+F。</summary>

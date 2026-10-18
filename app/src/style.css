@@ -415,3 +415,61 @@ code {
 }
 
 .warn-text { color: #ffb454 !important; }
+
+/* ---------- 显示项排序列表 ---------- */
+.order-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.order-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  transition: border-color .15s, background .15s;
+}
+.order-item:hover { border-color: #2b4257; background: #101a24; }
+.order-item.dragging-row { opacity: .4; }
+
+.order-item .ord-handle {
+  color: var(--muted);
+  cursor: grab;
+  font-size: 14px;
+  line-height: 1;
+  user-select: none;
+}
+.order-item .ord-handle:active { cursor: grabbing; }
+
+.order-item label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1 1 auto;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.order-item .ord-btns { display: inline-flex; gap: 3px; }
+.order-item .ord-btns button {
+  width: 22px;
+  height: 20px;
+  padding: 0;
+  font-size: 9px;
+  line-height: 1;
+  border: 1px solid var(--line);
+  background: #0a1017;
+  color: var(--muted);
+  border-radius: 4px;
+  cursor: pointer;
+}
+.order-item .ord-btns button:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.order-item .ord-btns button:disabled { opacity: .25; cursor: default; }

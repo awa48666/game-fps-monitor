@@ -259,7 +259,7 @@ public sealed class OverlayForm : Form
         catch (InvalidOperationException) { }
     }
 
-    private readonly record struct Row(string Label, string Value, bool IsTitle);
+    private readonly record struct Row(string Label, string Value, bool IsTitle, string Key);
 
     private List<Row> BuildRows(MonitorSnapshot s)
     {
@@ -291,7 +291,7 @@ public sealed class OverlayForm : Form
         if (_settings.ShowMemory) parts.Add("内存 " + s.MemoryUsagePercent.ToString("0") + "%");
 
         var rows = new List<Row>();
-        if (parts.Count > 0) rows.Add(new Row("", string.Join("   ", parts), false));
+        if (parts.Count > 0) rows.Add(new Row("", string.Join("   ", parts), false, "hline"));
         return rows;
     }
 
@@ -300,15 +300,16 @@ public sealed class OverlayForm : Form
     {
         var rows = new List<Row>();
 
+        // 游戏名是标题，永远置顶，不参与排序
         if (_settings.ShowGameName && !string.IsNullOrEmpty(s.GameName))
-            rows.Add(new Row("", s.GameName, true));
+            rows.Add(new Row("", s.GameName, true, "gamename"));
 
-        if (_settings.ShowFps) rows.Add(new Row("FPS", Fps(s.Fps), false));
-        if (_settings.ShowFrameTime) rows.Add(new Row("帧时间", s.AvgFrameTimeMs.ToString("0.00") + " ms", false));
-        if (_settings.ShowLow1) rows.Add(new Row("1% Low", Fps(s.Low1PercentFps), false));
-        if (_settings.ShowLow01) rows.Add(new Row("0.1% Low", Fps(s.Low01PercentFps), false));
+        if (_settings.ShowFps) rows.Add(new Row("FPS", Fps(s.Fps), false, "fps"));
+        if (_settings.ShowFrameTime) rows.Add(new Row("帧时间", s.AvgFrameTimeMs.ToString("0.00") + " ms", false, "frametime"));
+        if (_settings.ShowLow1) rows.Add(new Row("1% Low", Fps(s.Low1PercentFps), false, "low1"));
+        if (_settings.ShowLow01) rows.Add(new Row("0.1% Low", Fps(s.Low01PercentFps), false, "low01"));
 
-        if (_settings.ShowCpu) rows.Add(new Row("CPU", BuildCpuText(s), false));
+        if (_settings.ShowCpu) rows.Add(new Row("CPU", BuildCpuText(s), false, "cpu"));
 
         // 大小核：只在异构 CPU 上显示，且各自独立开关
         if (s.HasHeterogeneousCores)
@@ -317,29 +318,46 @@ public sealed class OverlayForm : Form
             {
                 string p = s.PCoreUsagePercent.ToString("0.0") + " %";
                 if (s.PCoreFrequencyMHz > 0) p += $"  {s.PCoreFrequencyMHz / 1000.0:0.00} GHz";
-                rows.Add(new Row("大核", p, false));
+                rows.Add(new Row("大核", p, false, "pcore"));
             }
             if (_settings.ShowECore && (s.ECoreUsagePercent > 0 || s.ECoreFrequencyMHz > 0))
             {
                 string e = s.ECoreUsagePercent.ToString("0.0") + " %";
                 if (s.ECoreFrequencyMHz > 0) e += $"  {s.ECoreFrequencyMHz / 1000.0:0.00} GHz";
-                rows.Add(new Row("小核", e, false));
+                rows.Add(new Row("小核", e, false, "ecore"));
             }
         }
 
-        if (_settings.ShowGpu) rows.Add(new Row("GPU", BuildGpuText(s), false));
+        if (_settings.ShowGpu) rows.Add(new Row("GPU", BuildGpuText(s), false, "gpu"));
 
         if (_settings.ShowGpuMemory)
         {
             string vram = s.GpuMemoryMB.ToString("0") + " MB";
             if (_settings.ShowVramTemperature && s.HasGpuMemoryTemperature && s.GpuMemoryTemperatureC > 0)
                 vram += $"  {s.GpuMemoryTemperatureC:0}°C";
-            rows.Add(new Row("显存", vram, false));
+            rows.Add(new Row("显存", vram, false, "vram"));
         }
 
-        if (_settings.ShowMemory) rows.Add(new Row("内存", s.MemoryUsagePercent.ToString("0.0") + " %", false));
+        if (_settings.ShowMemory) rows.Add(new Row("内存", s.MemoryUsagePercent.ToString("0.0") + " %", false, "memory"));
 
-        return rows;
+        return ApplyCustomOrder(rows);
+    }
+
+    /// <summary>
+    /// 按用户自定义的顺序重排。标题行保持最前；
+    /// 没出现在自定义顺序里的项（比如新版本新增的）排在末尾并保持原有相对次序。
+    /// </summary>
+    private List<Row> ApplyCustomOrder(List<Row> rows)
+    {
+        var order = _settings.OverlayOrder;
+        if (order == null || order.Count == 0) return rows;
+
+        return rows
+            .Select((r, i) => new { Row = r, Index = i, Pos = r.IsTitle ? -1 : order.IndexOf(r.Key) })
+            .OrderBy(x => x.Pos < 0 ? (x.Row.IsTitle ? -1 : int.MaxValue) : x.Pos)
+            .ThenBy(x => x.Index)
+            .Select(x => x.Row)
+            .ToList();
     }
 
     /// <summary>CPU 行的数值部分：占用率 + 可选的频率/功耗/温度。</summary>

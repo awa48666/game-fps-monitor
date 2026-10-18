@@ -785,12 +785,21 @@ function fillSettings(s) {
     else el.value = v === undefined || v === null ? '' : v;
   }
 
+  // 恢复自定义显示顺序（后端缺失或为空时用默认顺序）
+  const saved = Array.isArray(s.overlayOrder) ? s.overlayOrder.filter((k) => ORDER_ITEMS.some((i) => i.key === k)) : [];
+  const merged = saved.concat(ORDER_ITEMS.map((i) => i.key).filter((k) => !saved.includes(k)));
+  orderList = merged;
+
   // 手动目标的进程名不在 FIELDS 里，由监控页顶部下拉框承载
   syncRangeLabels();
 }
 
 function collectSettings() {
-  const out = {};
+  // 以「后端当前的设置」为基底，只覆盖界面上真实存在的控件。
+  // 否则 UI 里没有对应控件的字段（行间距、启动行为、自定义顺序等）
+  // 会被反序列化成 C# 默认值，表现出来就是“重启后设置被重置”。
+  const out = Object.assign({}, settings || {});
+
   for (const [key, kind] of FIELDS) {
     const el = $('s-' + key);
     if (!el) continue;
@@ -799,12 +808,14 @@ function collectSettings() {
     else out[key] = el.value;
   }
 
-  // 手动目标不归这个表单管，但要原样带回去，
-  // 否则 setSettings 反序列化出默认值，会把当前的锁定清掉。
+  // 手动目标不归这个表单管，但要原样带回去
   if (settings) {
     out.manualTargetEnabled = settings.manualTargetEnabled;
     out.manualTargetName = settings.manualTargetName || '';
   }
+
+  // 自定义显示顺序
+  out.overlayOrder = orderList.slice();
 
   return out;
 }
@@ -883,6 +894,104 @@ function setupHotkeyRecorder(input, pushSettings) {
     input.value = parts.join('+');
     input.blur();                            // 收起录制态（会触发 blur 里的还原判断）
     pushSettings(true);                      // 立即生效，热更新
+  });
+}
+
+/* ===================== 显示项自定义顺序 ===================== */
+
+/** 悬浮窗竖排样式能显示的项；key 必须与后端 BuildRowsVertical 里的 Key 一致。 */
+const ORDER_ITEMS = [
+  { key: 'gamename',  field: 'showGameName',        label: '游戏名' },
+  { key: 'fps',       field: 'showFps',             label: 'FPS' },
+  { key: 'frametime', field: 'showFrameTime',       label: '帧时间' },
+  { key: 'low1',      field: 'showLow1',            label: '1% Low' },
+  { key: 'low01',     field: 'showLow01',           label: '0.1% Low' },
+  { key: 'cpu',       field: 'showCpu',             label: 'CPU' },
+  { key: 'pcore',     field: 'showPCore',           label: '大核' },
+  { key: 'ecore',     field: 'showECore',           label: '小核' },
+  { key: 'gpu',       field: 'showGpu',             label: 'GPU' },
+  { key: 'vram',      field: 'showGpuMemory',       label: '显存' },
+  { key: 'memory',    field: 'showMemory',          label: '内存' },
+];
+
+let orderList = ORDER_ITEMS.map((i) => i.key);
+
+/** 按 orderList 重排显示项 DOM，并给每项挂上上下移动按钮。 */
+function renderOrderList(onChange) {
+  const wrap = $('order-list');
+  if (!wrap) return;
+
+  // 记住每个 checkbox 的勾选状态
+  const checked = {};
+  for (const it of ORDER_ITEMS) {
+    const el = $('s-' + it.field);
+    if (el) checked[it.field] = el.checked;
+  }
+
+  wrap.innerHTML = '';
+  orderList.forEach((key, idx) => {
+    const item = ORDER_ITEMS.find((i) => i.key === key);
+    if (!item) return;
+
+    const row = document.createElement('div');
+    row.className = 'order-item';
+    row.draggable = true;
+    row.dataset.key = key;
+    row.innerHTML = `
+      <span class="ord-handle" title="拖动排序">⠿</span>
+      <label><input type="checkbox" id="s-${item.field}"${checked[item.field] ? ' checked' : ''}><span>${item.label}</span></label>
+      <span class="ord-btns">
+        <button type="button" class="ord-up" title="上移"${idx === 0 ? ' disabled' : ''}>▲</button>
+        <button type="button" class="ord-down" title="下移"${idx === orderList.length - 1 ? ' disabled' : ''}>▼</button>
+      </span>`;
+    wrap.appendChild(row);
+  });
+
+  // 事件绑定
+  wrap.querySelectorAll('.order-item').forEach((row) => {
+    const key = row.dataset.key;
+    const idx = orderList.indexOf(key);
+    const item = ORDER_ITEMS.find((i) => i.key === key);
+
+    const cb = row.querySelector('input[type=checkbox]');
+    if (cb) cb.addEventListener('change', () => onChange(item.field, cb.checked));
+
+    const up = row.querySelector('.ord-up');
+    if (up) up.addEventListener('click', () => {
+      if (idx <= 0) return;
+      [orderList[idx - 1], orderList[idx]] = [orderList[idx], orderList[idx - 1]];
+      renderOrderList(onChange);
+      onChange(null, null);
+    });
+
+    const down = row.querySelector('.ord-down');
+    if (down) down.addEventListener('click', () => {
+      if (idx >= orderList.length - 1) return;
+      [orderList[idx + 1], orderList[idx]] = [orderList[idx], orderList[idx + 1]];
+      renderOrderList(onChange);
+      onChange(null, null);
+    });
+
+    // 拖动排序
+    row.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('text/plain', key);
+      e.dataTransfer.effectAllowed = 'move';
+      row.classList.add('dragging-row');
+    });
+    row.addEventListener('dragend', () => row.classList.remove('dragging-row'));
+    row.addEventListener('dragover', (e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; });
+    row.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const from = e.dataTransfer.getData('text/plain');
+      if (!from || from === key) return;
+      const fromIdx = orderList.indexOf(from);
+      const toIdx = orderList.indexOf(key);
+      if (fromIdx < 0 || toIdx < 0) return;
+      orderList.splice(fromIdx, 1);
+      orderList.splice(toIdx, 0, from);
+      renderOrderList(onChange);
+      onChange(null, null);
+    });
   });
 }
 
@@ -991,6 +1100,15 @@ function init() {
   // 热键录制：点输入框后直接按组合键
   setupHotkeyRecorder($('s-hotkeyToggleOverlay'), pushSettings);
   setupHotkeyRecorder($('s-hotkeyOpenMain'), pushSettings);
+
+  // 显示项：可勾选 + 拖动/箭头排序，改动即时下发
+  renderOrderList((field, checked) => {
+    if (field) {
+      const el = $('s-' + field);
+      if (el) el.checked = checked;
+    }
+    pushSettings(true);
+  });
 
   // 调整位置：切换悬浮窗的拖动模式
   let dragMode = false;
