@@ -6,6 +6,19 @@ using System.Text.Json.Serialization;
 
 namespace GameFPS.Backend;
 
+/// <summary>悬浮窗网格里的一个数据块。</summary>
+public sealed class OverlayBlock
+{
+    /// <summary>块类型，如 fps / frametime / cpu / curve / ftcurve。</summary>
+    public string Type { get; set; } = "";
+
+    /// <summary>所在行（0 起）。</summary>
+    public int Row { get; set; }
+
+    /// <summary>所在列（0 起）。</summary>
+    public int Col { get; set; }
+}
+
 /// <summary>悬浮窗 / 界面设置，持久化为 JSON。</summary>
 public sealed class OverlaySettings
 {
@@ -83,6 +96,19 @@ public sealed class OverlaySettings
     /// 空列表 = 用内置默认顺序。用户手动调整顺序后写入这里。
     /// </summary>
     public List<string> OverlayOrder { get; set; } = new();
+
+    // ---- 自由网格布局（在设置页拖拽编排）----
+    /// <summary>
+    /// 网格里已放置的数据块。列表为空时退回 OverlayStyle 的固定布局，
+    /// 保证老配置仍然可用。
+    /// </summary>
+    public List<OverlayBlock> OverlayBlocks { get; set; } = new();
+
+    /// <summary>网格行数（决定有多少个虚线空槽可拖入）。</summary>
+    public int GridRows { get; set; } = 3;
+
+    /// <summary>网格列数。</summary>
+    public int GridCols { get; set; } = 1;
 
     // ---- 热键 ----
     /// <summary>显示/隐藏悬浮窗的热键，如 F9 / Ctrl+Alt+F。</summary>

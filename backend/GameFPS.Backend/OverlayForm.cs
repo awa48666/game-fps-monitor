@@ -272,6 +272,56 @@ public sealed class OverlayForm : Form
     /// <summary>是否双列布局（样式3）。</summary>
     private bool IsTwoColumn => _settings.OverlayStyle == 3;
 
+    /// <summary>是否使用用户自定义的自由网格布局。</summary>
+    private bool UseGridLayout =>
+        _settings.OverlayBlocks != null && _settings.OverlayBlocks.Count > 0;
+
+    /// <summary>
+    /// 按块类型取显示内容。返回 (label, value)；
+    /// value 为 null 表示该块当前不可显示（例如非异构 CPU 上的大小核）。
+    /// 曲线块返回特殊标记，由渲染层单独处理。
+    /// </summary>
+    private (string Label, string Value) BlockContent(string type, MonitorSnapshot s)
+    {
+        switch (type)
+        {
+            case "gamename":
+                return string.IsNullOrEmpty(s.GameName) ? ("", MatchNoValue) : ("", s.GameName);
+            case "fps":
+                return ("FPS", Fps(s.Fps));
+            case "frametime":
+                return ("帧时间", s.AvgFrameTimeMs.ToString("0.00") + " ms");
+            case "low1":
+                return ("1% Low", Fps(s.Low1PercentFps));
+            case "low01":
+                return ("0.1% Low", Fps(s.Low01PercentFps));
+            case "cpu":
+                return ("CPU", BuildCpuText(s));
+            case "gpu":
+                return ("GPU", BuildGpuText(s));
+            case "pcore":
+                if (!s.HasHeterogeneousCores || s.PCoreFrequencyMHz <= 0) return ("", MatchNoValue);
+                return ("大核", $"{s.PCoreUsagePercent:0.0} %  {s.PCoreFrequencyMHz / 1000.0:0.00} GHz");
+            case "ecore":
+                if (!s.HasHeterogeneousCores || s.ECoreFrequencyMHz <= 0) return ("", MatchNoValue);
+                return ("小核", $"{s.ECoreUsagePercent:0.0} %  {s.ECoreFrequencyMHz / 1000.0:0.00} GHz");
+            case "vram":
+                return ("显存", s.GpuMemoryMB.ToString("0") + " MB");
+            case "memory":
+                return ("内存", s.MemoryUsagePercent.ToString("0.0") + " %");
+            case "curve":
+            case "ftcurve":
+                // 曲线块没有文本内容，由渲染层按 Type 单独绘制；
+                // 这里必须返回非 MatchNoValue，否则会被当成"不可显示"跳过
+                return ("", "");
+            default:
+                return ("", MatchNoValue);
+        }
+    }
+
+    /// <summary>不可显示的块的占位标记。</summary>
+    private const string MatchNoValue = "\u0001NONE";
+
     /// <summary>样式2：所有数值压成一行横排，最省屏幕空间。</summary>
     private List<Row> BuildRowsHorizontal(MonitorSnapshot s)
     {
@@ -409,8 +459,169 @@ public sealed class OverlayForm : Form
 
     private static string Fps(double v) => v <= 0.05 ? "--" : v.ToString("0");
 
+    /// <summary>
+    /// 自由网格布局渲染：每个已放置的块占一个格子，
+    /// 列宽取该列最宽的块，行高取该行最高的块，曲线块也一样。
+    /// </summary>
+    private void RenderGrid(MonitorSnapshot s)
+    {
+        float scale = (float)Math.Clamp(_settings.Scale, 0.5, 4.0);
+        using var font = new Font(_settings.FontFamily, 10.5f * scale, FontStyle.Bold, GraphicsUnit.Point);
+
+        float pad = 10f * scale;
+        float gap = 14f * scale;
+        float cellPadX = 12f * scale;      // 格内左右留白
+        float cellPadY = 6f * scale;       // 格内上下留白
+        float rowGap = Math.Max(0f, _settings.RowGap) * scale;
+        float lineH = font.GetHeight() + rowGap;
+
+        float chartH = Math.Max(16f, _settings.OverlayChartHeight * scale);
+        float ftChartH = Math.Max(16f, _settings.OverlayChartHeight * scale * 0.75f);
+        float chartMinW = 150f * scale;
+
+        // 收集可见块
+        var cells = new Dictionary<(int, int), (string Label, string Value, string Type)>();
+        int maxRow = 0, maxCol = 0;
+        foreach (var b in _settings.OverlayBlocks)
+        {
+            var (label, value) = BlockContent(b.Type, s);
+            if (value == MatchNoValue) continue;
+            cells[(b.Row, b.Col)] = (label, value, b.Type);
+            if (b.Row > maxRow) maxRow = b.Row;
+            if (b.Col > maxCol) maxCol = b.Col;
+        }
+
+        if (cells.Count == 0)
+        {
+            if (Visible) { Hide(); OverlayVisible = false; }
+            return;
+        }
+
+        int rows = Math.Max(Math.Max(1, _settings.GridRows), maxRow + 1);
+        int cols = Math.Max(Math.Max(1, _settings.GridCols), maxCol + 1);
+
+        float[] colW = new float[cols];
+        float[] rowH = new float[rows];
+
+        using (var mb = new Bitmap(1, 1))
+        using (var mg = Graphics.FromImage(mb))
+        {
+            foreach (var kv in cells)
+            {
+                var (label, value, type) = kv.Value;
+                float w, h;
+
+                if (type == "curve") { w = chartMinW; h = chartH; }
+                else if (type == "ftcurve") { w = chartMinW; h = ftChartH; }
+                else
+                {
+                    float lw = label.Length > 0 ? mg.MeasureString(label, font).Width : 0f;
+                    float vw = mg.MeasureString(value, font).Width;
+                    w = lw + (lw > 0 ? gap : 0f) + vw;
+                    h = lineH;
+                }
+
+                int c = kv.Key.Item2, r = kv.Key.Item1;
+                if (w > colW[c]) colW[c] = w;
+                if (h > rowH[r]) rowH[r] = h;
+            }
+        }
+
+        // 空的列/行也要留出可拖入的面积
+        for (int c = 0; c < cols; c++)
+            if (colW[c] <= 0) colW[c] = chartMinW;
+        for (int r = 0; r < rows; r++)
+            if (rowH[r] <= 0) rowH[r] = lineH;
+
+        float totalW = pad * 2;
+        for (int c = 0; c < cols; c++) totalW += colW[c] + (c > 0 ? cellPadX : 0f);
+
+        float totalH = pad * 2;
+        for (int r = 0; r < rows; r++) totalH += rowH[r] + (r > 0 ? cellPadY : 0f);
+
+        int width = Math.Max(80, (int)Math.Ceiling(totalW));
+        int height = Math.Max(24, (int)Math.Ceiling(totalH));
+
+        using var bmp = new Bitmap(width, height, PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(bmp))
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TextRenderingHint = TextRenderingHint.AntiAlias;
+            g.Clear(Color.Transparent);
+
+            float radius = Math.Max(0f, _settings.CornerRadius * scale);
+            using (var path = RoundedRect(new RectangleF(0, 0, width, height), radius))
+            using (var back = new SolidBrush(Color.FromArgb(
+                Math.Clamp(_settings.BackOpacity, 0, 255), ParseColor(_settings.BackColor, Color.Black))))
+            {
+                g.FillPath(back, path);
+            }
+
+            using var labelBrush = new SolidBrush(ParseColor(_settings.LabelColor, Color.White));
+            using var valueBrush = new SolidBrush(ParseColor(_settings.TextColor, Color.Lime));
+            using var shadow = new SolidBrush(Color.FromArgb(200, 0, 0, 0));
+
+            // 逐格绘制
+            for (int r = 0; r < rows; r++)
+            {
+                float y = pad;
+                for (int i = 0; i < r; i++) y += rowH[i] + cellPadY;
+
+                float x = pad;
+                for (int c = 0; c < cols; c++)
+                {
+                    if (cells.TryGetValue((r, c), out var cell))
+                    {
+                        if (cell.Type == "curve")
+                        {
+                            DrawMiniChart(g, s.RecentFrameTimes,
+                                s.Low1PercentHistory, s.Low01PercentHistory,
+                                _settings.ShowOverlayLow1, _settings.ShowOverlayLow01,
+                                x, y, colW[c], rowH[r], valueBrushColor);
+                        }
+                        else if (cell.Type == "ftcurve")
+                        {
+                            DrawFrameTimeMiniChart(g, s.RecentFrameTimes,
+                                x, y, colW[c], rowH[r], Color.FromArgb(100, 210, 255));
+                        }
+                        else
+                        {
+                            if (cell.Label.Length > 0)
+                            {
+                                g.DrawString(cell.Label, font, shadow, x + 1f, y + 1f);
+                                g.DrawString(cell.Label, font, labelBrush, x, y);
+                                float lw = g.MeasureString(cell.Label, font).Width;
+                                g.DrawString(cell.Value, font, shadow, x + lw + gap + 1f, y + 1f);
+                                g.DrawString(cell.Value, font, valueBrush, x + lw + gap, y);
+                            }
+                            else
+                            {
+                                g.DrawString(cell.Value, font, shadow, x + 1f, y + 1f);
+                                g.DrawString(cell.Value, font, valueBrush, x, y);
+                            }
+                        }
+                    }
+                    x += colW[c] + cellPadX;
+                }
+            }
+        }
+
+        PushToScreen(bmp, _settings.X, _settings.Y);
+
+        if (!Visible)
+        {
+            Show();
+            OverlayVisible = true;
+        }
+    }
+
+    /// <summary>曲线用的颜色（取自数值颜色）。</summary>
+    private Color valueBrushColor => ParseColor(_settings.TextColor, Color.Lime);
+
     private void Render(MonitorSnapshot s)
     {
+        if (UseGridLayout) { RenderGrid(s); return; }
+
         var rows = BuildRows(s);
         if (rows.Count == 0)
         {

@@ -186,6 +186,22 @@
       </label>
       <p class="muted small" id="drag-hint">点「调整位置」后，直接拖动屏幕上的悬浮窗到想要的地方，拖完再点一次结束。</p>
 
+      <h4>网格布局编辑器</h4>
+      <p class="muted small" style="margin:-4px 0 8px">
+        把下面的数据块拖进虚线框即可放置；点已放置的块可以移除。
+        放好一格后，右侧和下方会自动补出新的虚线框。
+      </p>
+
+      <div class="block-pool" id="block-pool"></div>
+
+      <div class="grid-editor" id="grid-editor"></div>
+
+      <div class="row" style="margin-top:8px">
+        <button id="btn-grid-clear" class="mini">清空网格</button>
+        <button id="btn-grid-auto" class="mini">填入默认项</button>
+        <span id="grid-hint" class="muted small"></span>
+      </div>
+
       <h4>显示项（可拖动或用 ▲▼ 调整上下顺序）</h4>
       <div class="order-list" id="order-list"></div>
 

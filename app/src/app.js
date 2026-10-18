@@ -790,6 +790,14 @@ function fillSettings(s) {
   const merged = saved.concat(ORDER_ITEMS.map((i) => i.key).filter((k) => !saved.includes(k)));
   orderList = merged;
 
+  // 恢复网格布局
+  const blocks = Array.isArray(s.overlayBlocks) ? s.overlayBlocks.filter((b) => b && BLOCK_TYPES.some((t) => t.key === b.type)) : [];
+  gridState = {
+    blocks: blocks.map((b) => ({ type: b.type, row: Number(b.row) || 0, col: Number(b.col) || 0 })),
+    rows: Math.max(1, Number(s.gridRows) || 3),
+    cols: Math.max(1, Number(s.gridCols) || 1),
+  };
+
   // 手动目标的进程名不在 FIELDS 里，由监控页顶部下拉框承载
   syncRangeLabels();
 }
@@ -816,6 +824,11 @@ function collectSettings() {
 
   // 自定义显示顺序
   out.overlayOrder = orderList.slice();
+
+  // 自由网格布局
+  out.overlayBlocks = gridState.blocks.map((b) => ({ type: b.type, row: b.row, col: b.col }));
+  out.gridRows = gridState.rows;
+  out.gridCols = gridState.cols;
 
   return out;
 }
@@ -995,6 +1008,136 @@ function renderOrderList(onChange) {
   });
 }
 
+/* ===================== 网格布局编辑器 ===================== */
+
+/** 可拖进网格的数据块类型；key 必须与后端 BlockContent 的 case 一致。 */
+const BLOCK_TYPES = [
+  { key: 'gamename',  label: '游戏名' },
+  { key: 'fps',       label: 'FPS' },
+  { key: 'frametime', label: '帧时间' },
+  { key: 'low1',      label: '1% Low' },
+  { key: 'low01',     label: '0.1% Low' },
+  { key: 'cpu',       label: 'CPU' },
+  { key: 'gpu',       label: 'GPU' },
+  { key: 'pcore',     label: '大核' },
+  { key: 'ecore',     label: '小核' },
+  { key: 'vram',      label: '显存' },
+  { key: 'memory',    label: '内存' },
+  { key: 'curve',     label: '帧率曲线' },
+  { key: 'ftcurve',   label: '帧时间曲线' },
+];
+
+const DEFAULT_GRID_BLOCKS = [
+  { type: 'gamename',  row: 0, col: 0 },
+  { type: 'fps',       row: 1, col: 0 },
+  { type: 'frametime', row: 2, col: 0 },
+  { type: 'cpu',       row: 3, col: 0 },
+  { type: 'gpu',       row: 4, col: 0 },
+  { type: 'curve',     row: 5, col: 0 },
+];
+
+let gridState = { blocks: [], rows: 3, cols: 1 };
+
+/** 找某个格子上已放置的块。 */
+function blockAt(row, col) {
+  return gridState.blocks.find((b) => b.row === row && b.col === col) || null;
+}
+
+/**
+ * 放置一个块。放好后保证它的右侧和下方各有一个空槽（没有就扩展网格）。
+ */
+function placeBlock(type, row, col) {
+  gridState.blocks = gridState.blocks.filter((b) => !(b.row === row && b.col === col));
+  gridState.blocks.push({ type, row, col });
+  gridState.rows = Math.max(gridState.rows, row + 2);   // 下方留一格
+  gridState.cols = Math.max(gridState.cols, col + 2);   // 右侧留一格
+}
+
+function removeBlock(row, col) {
+  const before = gridState.blocks.length;
+  gridState.blocks = gridState.blocks.filter((b) => !(b.row === row && b.col === col));
+  return gridState.blocks.length !== before;
+}
+
+/** 渲染下方“数据块池”。 */
+function renderBlockPool(onChange) {
+  const pool = $('block-pool');
+  if (!pool) return;
+
+  const used = new Set(gridState.blocks.map((b) => b.type));
+  pool.innerHTML = '';
+  for (const t of BLOCK_TYPES) {
+    const chip = document.createElement('div');
+    chip.className = 'block-chip' + (used.has(t.key) ? ' used' : '');
+    chip.textContent = t.label;
+    chip.draggable = true;
+    chip.dataset.type = t.key;
+    chip.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('text/plain', 'block:' + t.key);
+      e.dataTransfer.effectAllowed = 'copy';
+    });
+    pool.appendChild(chip);
+  }
+}
+
+/** 渲染网格（虚线空槽 + 已放置的块）。 */
+function renderGridEditor(onChange) {
+  const wrap = $('grid-editor');
+  if (!wrap) return;
+
+  wrap.style.gridTemplateColumns = `repeat(${gridState.cols}, minmax(110px, 1fr))`;
+  wrap.innerHTML = '';
+
+  for (let r = 0; r < gridState.rows; r++) {
+    for (let c = 0; c < gridState.cols; c++) {
+      const placed = blockAt(r, c);
+      const slot = document.createElement('div');
+      slot.className = 'grid-slot' + (placed ? ' filled' : '');
+      slot.dataset.row = r;
+      slot.dataset.col = c;
+
+      if (placed) {
+        const def = BLOCK_TYPES.find((t) => t.key === placed.type);
+        slot.innerHTML = `<span class="slot-label">${def ? def.label : placed.type}</span>`
+                       + `<span class="slot-kind">R${r + 1}C${c + 1}</span>`;
+        slot.title = '点击移除';
+        slot.addEventListener('click', () => {
+          if (removeBlock(r, c)) { renderGridEditor(onChange); onChange(); }
+        });
+      } else {
+        slot.textContent = '拖到这里';
+      }
+
+      slot.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        slot.classList.add('drag-over');
+      });
+      slot.addEventListener('dragleave', () => slot.classList.remove('drag-over'));
+      slot.addEventListener('drop', (e) => {
+        e.preventDefault();
+        slot.classList.remove('drag-over');
+        const data = e.dataTransfer.getData('text/plain') || '';
+        const type = data.startsWith('block:') ? data.slice(6) : data;
+        if (!BLOCK_TYPES.some((t) => t.key === type)) return;
+        placeBlock(type, r, c);
+        renderGridEditor(onChange);
+        renderBlockPool(onChange);
+        onChange();
+      });
+
+      wrap.appendChild(slot);
+    }
+  }
+
+  const hint = $('grid-hint');
+  if (hint) {
+    hint.textContent = gridState.blocks.length
+      ? `已放置 ${gridState.blocks.length} 个块 · 网格 ${gridState.rows}×${gridState.cols}`
+      : '网格为空时悬浮窗会使用「样式」下拉里的固定布局';
+  }
+}
+
 function syncRangeLabels() {  const pairs = [['scale', 2], ['backOpacity', 0], ['cornerRadius', 0], ['overlayChartHeight', 0]];
   for (const [key, digits] of pairs) {
     const el = $('s-' + key);
@@ -1109,6 +1252,34 @@ function init() {
     }
     pushSettings(true);
   });
+
+  // 网格布局编辑器
+  const onGridChange = () => pushSettings(true);
+  renderBlockPool(onGridChange);
+  renderGridEditor(onGridChange);
+
+  const btnGridClear = $('btn-grid-clear');
+  if (btnGridClear) {
+    btnGridClear.addEventListener('click', () => {
+      gridState = { blocks: [], rows: 3, cols: 1 };
+      renderGridEditor(onGridChange);
+      renderBlockPool(onGridChange);
+      onGridChange();
+    });
+  }
+
+  const btnGridAuto = $('btn-grid-auto');
+  if (btnGridAuto) {
+    btnGridAuto.addEventListener('click', () => {
+      gridState = {
+        blocks: DEFAULT_GRID_BLOCKS.map((b) => ({ ...b })),
+        rows: 6, cols: 2,
+      };
+      renderGridEditor(onGridChange);
+      renderBlockPool(onGridChange);
+      onGridChange();
+    });
+  }
 
   // 调整位置：切换悬浮窗的拖动模式
   let dragMode = false;
