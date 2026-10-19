@@ -140,6 +140,13 @@ public sealed class OverlaySettings
     public bool StartMinimizedToTray { get; set; } = true;
     public bool LaunchElectronUi { get; set; } = true;
 
+    /// <summary>
+    /// 程序自身进程优先级：Normal / AboveNormal / High。
+    /// 调高能让采集线程更及时处理 ETW 事件，代价是多占一点 CPU 时间片。
+    /// 不提供 RealTime —— 那会连键盘鼠标输入都挤掉。
+    /// </summary>
+    public string PriorityClass { get; set; } = "Normal";
+
     [JsonIgnore]
     public static string DefaultPath => AppPaths.SettingsFile;
 

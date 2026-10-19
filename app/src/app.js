@@ -774,7 +774,42 @@ const FIELDS = [
   ['writeFrameCsv', 'checkbox'],
   ['sessionIdleSeconds', 'number'],
   ['maxSessionsInHistory', 'number'],
+  ['priorityClass', 'text'],
 ];
+
+/* ===================== 悬浮窗配色主题 ===================== */
+
+const THEMES = {
+  dark:  { backColor: '#0B0F14', textColor: '#6EF3C0', labelColor: '#D8E6F2' },
+  light: { backColor: '#FFFFFF', textColor: '#0A6B4A', labelColor: '#3A4A5A' },
+};
+
+/** 根据当前颜色反推是深色、浅色还是自定义。 */
+function detectTheme(s) {
+  const back = String((s && s.backColor) || '').toUpperCase();
+  if (back === '#FFFFFF' || back === '#FFF') return 'light';
+  if (back === '#0B0F14') return 'dark';
+  return 'custom';
+}
+
+function applyTheme(theme, pushSettings) {
+  const preset = THEMES[theme];
+  if (!preset) return;              // custom 不改任何颜色
+  const t = $('s-textColor'), l = $('s-labelColor'), b = $('s-backColor');
+  if (t) t.value = preset.textColor;
+  if (l) l.value = preset.labelColor;
+  if (b) b.value = preset.backColor;
+
+  // 白底若太透明，会透出桌面颜色发灰、深色文字看不清，顺手把不透明度提到够用的水平
+  if (theme === 'light') {
+    const op = $('s-backOpacity');
+    if (op && Number(op.value) < 215) {
+      op.value = 225;
+      syncRangeLabels();
+    }
+  }
+  pushSettings(true);
+}
 
 function fillSettings(s) {
   for (const [key, kind] of FIELDS) {
@@ -797,6 +832,10 @@ function fillSettings(s) {
     rows: Math.max(1, Number(s.gridRows) || 3),
     cols: Math.max(1, Number(s.gridCols) || 1),
   };
+
+  // 主题选择器反映当前配色
+  const themeSel = $('s-colorTheme');
+  if (themeSel) themeSel.value = detectTheme(s);
 
   // 手动目标的进程名不在 FIELDS 里，由监控页顶部下拉框承载
   syncRangeLabels();
@@ -1278,6 +1317,15 @@ function init() {
       renderGridEditor(onGridChange);
       renderBlockPool(onGridChange);
       onGridChange();
+    });
+  }
+
+  // 配色主题：选深色/浅色时一次性覆盖三个颜色；选自定义则保留原样
+  const themeSel = $('s-colorTheme');
+  if (themeSel) {
+    themeSel.addEventListener('change', () => {
+      if (themeSel.value === 'custom') return;
+      applyTheme(themeSel.value, pushSettings);
     });
   }
 

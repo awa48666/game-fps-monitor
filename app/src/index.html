@@ -264,6 +264,14 @@
         <input type="text" id="s-fontFamily" class="text">
       </label>
       <label class="row">
+        <span>配色主题</span>
+        <select id="s-colorTheme" class="text">
+          <option value="dark">深色（黑底亮字）</option>
+          <option value="light">浅色（白底深字）</option>
+          <option value="custom">自定义</option>
+        </select>
+      </label>
+      <label class="row">
         <span>数值颜色</span>
         <input type="color" id="s-textColor">
         <span>标签颜色</span>
@@ -288,6 +296,22 @@
       <p class="muted small">
         点输入框后直接按下想用的组合键即可录入；按 <code>Esc</code> 取消。
         支持字母、数字、<code>F1</code>~<code>F24</code>，可搭配 <code>Ctrl</code> / <code>Alt</code> / <code>Shift</code> / <code>Win</code>。
+      </p>
+    </div>
+
+    <div class="card">
+      <h3>性能</h3>
+      <label class="row">
+        <span>程序优先级</span>
+        <select id="s-priorityClass" class="text">
+          <option value="Normal">正常</option>
+          <option value="AboveNormal">高于正常</option>
+          <option value="High">高</option>
+        </select>
+      </label>
+      <p class="muted small">
+        调高可以让采集线程更及时处理事件，代价是多占一点 CPU 时间片，通常选「正常」即可。
+        不提供「实时」—— 那会把鼠标键盘的输入响应也挤掉。
       </p>
     </div>
 

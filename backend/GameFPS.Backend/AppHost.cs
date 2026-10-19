@@ -136,6 +136,8 @@ public sealed class AppHost : IDisposable
             return false;
         }
 
+        ApplyPriority();
+
         if (_settings.LaunchElectronUi) LaunchElectron();
         return true;
     }
@@ -348,9 +350,34 @@ public sealed class AppHost : IDisposable
         _overlay?.UpdateSettings(_settings);
         _hotkeys?.Apply(_settings);
         _tray?.SetOverlayChecked(_settings.OverlayEnabled);
+        ApplyPriority();
         ApplyRecordingSettings();
         SendSettings();
         if (_last != null) OnSnapshot(_last);
+    }
+
+    /// <summary>
+    /// 应用进程优先级。RealTime 不开放 —— 那会把鼠标键盘的输入线程都挤掉，
+    /// 表现为系统卡顿。这里只接受 Normal / AboveNormal / High。
+    /// </summary>
+    private void ApplyPriority()
+    {
+        try
+        {
+            var cls = _settings.PriorityClass switch
+            {
+                "High" => ProcessPriorityClass.High,
+                "AboveNormal" => ProcessPriorityClass.AboveNormal,
+                _ => ProcessPriorityClass.Normal,
+            };
+
+            using var self = System.Diagnostics.Process.GetCurrentProcess();
+            if (self.PriorityClass != cls) self.PriorityClass = cls;
+        }
+        catch
+        {
+            // 某些受保护环境下修改优先级会抛异常，忽略即可，不影响主功能
+        }
     }
 
     private void SendSettings()
