@@ -13,7 +13,7 @@
 不想编译的话，去 **[Releases](https://github.com/awa48666/game-fps-monitor/releases/latest)** 下载：
 
 ```
-GameFPS-v1.0.4-win-x64.zip    约 190 MB
+GameFPS-v1.0.5-win-x64.zip    约 190 MB
 ```
 
 解压后双击 `GameFPS.exe` 即可。**包内已内置 .NET 10 与 Electron，不需要额外安装任何运行时。**
@@ -21,6 +21,7 @@ GameFPS-v1.0.4-win-x64.zip    约 190 MB
 <details>
 <summary>版本历史</summary>
 
+- **v1.0.5** — 新增程序优先级（正常/高于正常/高）与浅色配色主题（白底深字）
 - **v1.0.4** — 数据改存 `%LOCALAPPDATA%`，更新软件不再丢失历史记录（旧数据自动迁移）
 - **v1.0.3** — 悬浮窗改为自由网格布局，设置页可拖拽编排（曲线也是独立块）
 - **v1.0.2** — 新增样式3（竖排双列，每行两项）
