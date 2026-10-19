@@ -141,8 +141,7 @@ public sealed class OverlaySettings
     public bool LaunchElectronUi { get; set; } = true;
 
     [JsonIgnore]
-    public static string DefaultPath =>
-        Path.Combine(AppContext.BaseDirectory, "settings.json");
+    public static string DefaultPath => AppPaths.SettingsFile;
 
     public static OverlaySettings Load(string? path = null)
     {

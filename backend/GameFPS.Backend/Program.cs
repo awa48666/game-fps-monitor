@@ -11,6 +11,10 @@ internal static class Program
     {
         ApplicationConfiguration.Initialize();
 
+        // 老版本把 settings.json 和 records\ 放在程序目录里，
+        // 覆盖更新时会被一起删掉。先搬到 %LOCALAPPDATA%，以后更新不再丢。
+        AppPaths.MigrateFromLegacy();
+
         // 单实例：重复启动时提示并从托盘唤起
         using var singleInstance = new Mutex(true, @"Global\GameFPSMonitor.D0F2A9C1", out bool isFirstInstance);
         if (!isFirstInstance)

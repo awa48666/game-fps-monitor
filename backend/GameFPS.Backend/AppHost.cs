@@ -96,8 +96,8 @@ public sealed class AppHost : IDisposable
             }
             _engine.Updated += OnSnapshot;
 
-            // 游戏退出时自动落盘帧率记录
-            _recorder = new SessionRecorder(Path.Combine(AppContext.BaseDirectory, "records"));
+            // 游戏退出时自动落盘帧率记录（存到 %LOCALAPPDATA%，不随程序更新丢失）
+            _recorder = new SessionRecorder(AppPaths.RecordsDir);
             _engine.Recorder = _recorder;
             _engine.SessionCompleted += OnSessionCompleted;
             ApplyRecordingSettings();

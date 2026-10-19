@@ -213,10 +213,16 @@ ETW 的 **realtime 会话在宿主进程被强制终止（taskkill / 任务管�
 
 **保存位置与内容**：
 
+所有数据都放在 **`%LOCALAPPDATA%\GameFPSMonitor\`**，**不在程序目录里**——这样覆盖更新软件时历史记录不会丢。
+
 | 文件 | 内容 |
 |---|---|
-| `records\sessions.json` | 每场一条汇总（最新在前），界面的「历史记录」页直接读它 |
-| `records\csv\<时间>_<游戏名>_pid<N>.csv` | 逐帧帧时间与瞬时 FPS，可用 Excel 打开做同口径分析 |
+| `%LOCALAPPDATA%\GameFPSMonitor\settings.json` | 全部设置 |
+| `%LOCALAPPDATA%\GameFPSMonitor\records\sessions.json` | 每场一条汇总（最新在前），界面的「历史记录」页直接读它 |
+| `%LOCALAPPDATA%\GameFPSMonitor\records\csv\<时间>_<游戏名>_pid<N>.csv` | 逐帧帧时间与瞬时 FPS，可用 Excel 打开做同口径分析 |
+
+> 从 v1.0.3 及更早版本升级时，程序首次启动会自动把旧位置（程序目录）里的
+> `settings.json` 和 `records\` 搬到新位置，历史记录无需手动迁移。
 
 **汇总字段**：开始/结束时间、时长、总帧数、参与统计帧数、平均 FPS、中位 FPS、最高/最低 FPS、
 平均/最小/最大帧时间、**1% Low**、**0.1% Low**、卡顿帧数（帧时间 > 平均值两倍）、逐帧 CSV 文件名。
