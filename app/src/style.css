@@ -3,13 +3,35 @@
   --panel: #121a22;
   --panel-2: #16212b;
   --line: #223140;
+  --line-strong: #2b4257;
   --text: #dbe7f3;
   --muted: #7d93a8;
   --accent: #6ef3c0;
   --accent-dim: #2f7d63;
   --warn: #ffb454;
   --err: #ff6b6b;
+  --input-bg: #0a1017;
+  --hover-bg: #101a24;
+  --active-bg: #10201a;
   --mono: "Cascadia Mono", "Consolas", ui-monospace, monospace;
+}
+
+/* 浅色主题：只覆盖颜色变量，布局与尺寸完全复用 */
+[data-theme="light"] {
+  --bg: #f2f5f8;
+  --panel: #ffffff;
+  --panel-2: #f7f9fb;
+  --line: #d8e0e8;
+  --line-strong: #b9c7d4;
+  --text: #1b2733;
+  --muted: #64798c;
+  --accent: #0d9b6c;
+  --accent-dim: #7fd0b3;
+  --warn: #d97a1a;
+  --err: #d34545;
+  --input-bg: #ffffff;
+  --hover-bg: #eef4f9;
+  --active-bg: #e3f5ee;
 }
 
 * { box-sizing: border-box; }
@@ -31,7 +53,7 @@ html, body {
   align-items: center;
   justify-content: space-between;
   padding: 0 16px;
-  background: linear-gradient(180deg, #101922, #0c1219);
+  background: linear-gradient(180deg, var(--hover-bg), var(--input-bg));
   border-bottom: 1px solid var(--line);
   -webkit-app-region: drag;
 }
@@ -55,7 +77,7 @@ html, body {
   gap: 4px;
   padding: 8px 14px 0;
   border-bottom: 1px solid var(--line);
-  background: #0c1219;
+  background: var(--input-bg);
 }
 .tab {
   background: transparent;
@@ -104,7 +126,7 @@ main { height: calc(100% - 46px - 46px); overflow-y: auto; padding: 16px; }
 .badges { display: flex; gap: 8px; }
 .badge {
   font-size: 11px; padding: 3px 9px; border-radius: 999px;
-  border: 1px solid var(--accent-dim); color: var(--accent); background: #10201a;
+  border: 1px solid var(--accent-dim); color: var(--accent); background: var(--active-bg);
 }
 
 /* ---------- 顶部网格 ---------- */
@@ -135,7 +157,7 @@ main { height: calc(100% - 46px - 46px); overflow-y: auto; padding: 16px; }
 .hw-head { display: flex; justify-content: space-between; margin-bottom: 9px; font-size: 13px; }
 .hw-head span { color: var(--muted); }
 .hw-head b { font-family: var(--mono); font-variant-numeric: tabular-nums; }
-.bar { height: 7px; background: #0a1017; border-radius: 999px; overflow: hidden; }
+.bar { height: 7px; background: var(--input-bg); border-radius: 999px; overflow: hidden; }
 .bar i {
   display: block; height: 100%; width: 0;
   background: linear-gradient(90deg, var(--accent-dim), var(--accent));
@@ -157,7 +179,7 @@ main { height: calc(100% - 46px - 46px); overflow-y: auto; padding: 16px; }
 .row.toggle > span { min-width: auto; color: var(--text); }
 input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); }
 .num, .text {
-  background: #0a1017; border: 1px solid var(--line); color: var(--text);
+  background: var(--input-bg); border: 1px solid var(--line); color: var(--text);
   border-radius: 7px; padding: 6px 9px; font-family: inherit; font-size: 13px;
 }
 .num { width: 84px; }
@@ -166,7 +188,7 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 input[type="range"] { flex: 1; accent-color: var(--accent); max-width: 260px; }
 input[type="color"] {
   width: 42px; height: 30px; padding: 2px; border: 1px solid var(--line);
-  border-radius: 7px; background: #0a1017; cursor: pointer;
+  border-radius: 7px; background: var(--input-bg); cursor: pointer;
 }
 
 .checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
@@ -174,7 +196,7 @@ input[type="color"] {
 
 .presets { display: flex; gap: 6px; margin-left: auto; }
 .mini {
-  background: #0a1017; border: 1px solid var(--line); color: var(--muted);
+  background: var(--input-bg); border: 1px solid var(--line); color: var(--muted);
   border-radius: 6px; padding: 5px 10px; cursor: pointer; font-size: 12px; font-family: inherit;
 }
 .mini:hover { color: var(--accent); border-color: var(--accent-dim); }
@@ -250,7 +272,7 @@ td.game-cell { color: var(--text); }
 
 /* 进程下拉框 */
 select.text {
-  background: #0a1017;
+  background: var(--input-bg);
   border: 1px solid var(--line);
   color: var(--text);
   border-radius: 7px;
@@ -260,7 +282,7 @@ select.text {
   min-width: 0;
   cursor: pointer;
 }
-select.text option { background: #0a1017; color: var(--text); }
+select.text option { background: var(--input-bg); color: var(--text); }
 
 /* ---------- 监控页：监测目标选择器 ---------- */
 .game-bar { gap: 16px; flex-wrap: wrap; }
@@ -269,7 +291,7 @@ select.text option { background: #0a1017; color: var(--text); }
 .target-picker .label { font-size: 12px; color: var(--muted); }
 
 .target-select {
-  background: #0a1017;
+  background: var(--input-bg);
   border: 1px solid var(--line);
   color: var(--text);
   border-radius: 7px;
@@ -280,7 +302,7 @@ select.text option { background: #0a1017; color: var(--text); }
   max-width: 430px;
   cursor: pointer;
 }
-.target-select option { background: #0a1017; color: var(--text); }
+.target-select option { background: var(--input-bg); color: var(--text); }
 
 /* ---------- 历史页：各场对比曲线 ---------- */
 #history-chart-wrap { margin-bottom: 14px; }
@@ -314,6 +336,7 @@ select.text option { background: #0a1017; color: var(--text); }
 }
 
 .hist-card {
+  position: relative;
   background: var(--panel-2);
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -322,7 +345,38 @@ select.text option { background: #0a1017; color: var(--text); }
   transition: border-color .15s, background .15s;
 }
 .hist-card:hover { border-color: var(--accent-dim); }
-.hist-card.active { border-color: var(--accent); background: #10201a; }
+
+/* 单条删除：默认半透明，悬停在卡片上才醒目，避免抢了"点开看详情"的主交互 */
+.hist-del {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .15s, color .15s, border-color .15s, background .15s;
+}
+.hist-card:hover .hist-del { opacity: .65; }
+.hist-del:hover {
+  opacity: 1;
+  color: var(--err);
+  border-color: var(--err);
+  background: var(--input-bg);
+}
+
+.mini.danger:hover {
+  color: var(--err);
+  border-color: var(--err);
+}
+.hist-card.active { border-color: var(--accent); background: var(--active-bg); }
 
 .hist-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
 .hist-game { font-weight: 700; color: var(--text); font-size: 14px; }
@@ -369,7 +423,7 @@ select.text option { background: #0a1017; color: var(--text); }
 .lg-low1 { background: #ffb454; }
 .lg-low01 { background: #b48cff; }
 .lg-ft { background: #64d2ff; }
-.lg-ftavg { background: #7d93a8; }
+.lg-ftavg { background: var(--muted); }
 
 #ft-chart { width: 100%; height: 150px; display: block; }
 
@@ -388,7 +442,7 @@ button.dragging {
 }
 
 code {
-  background: #0a1017; padding: 1px 5px; border-radius: 4px;
+  background: var(--input-bg); padding: 1px 5px; border-radius: 4px;
   font-family: var(--mono); font-size: 12px; color: var(--accent);
 }
 
@@ -401,7 +455,7 @@ code {
 .hotkey-input:focus {
   outline: none;
   border-color: var(--accent);
-  background: #0d1a22;
+  background: var(--input-bg);
   color: var(--accent);
 }
 .hotkey-input.recording {
@@ -434,7 +488,7 @@ code {
   border-radius: 7px;
   transition: border-color .15s, background .15s;
 }
-.order-item:hover { border-color: #2b4257; background: #101a24; }
+.order-item:hover { border-color: var(--line-strong); background: var(--hover-bg); }
 .order-item.dragging-row { opacity: .4; }
 
 .order-item .ord-handle {
@@ -463,7 +517,7 @@ code {
   font-size: 9px;
   line-height: 1;
   border: 1px solid var(--line);
-  background: #0a1017;
+  background: var(--input-bg);
   color: var(--muted);
   border-radius: 4px;
   cursor: pointer;
@@ -481,8 +535,8 @@ code {
   gap: 6px;
   margin-bottom: 10px;
   padding: 8px;
-  background: #0a1017;
-  border: 1px dashed #24384a;
+  background: var(--input-bg);
+  border: 1px dashed var(--line-strong);
   border-radius: 8px;
 }
 
@@ -497,7 +551,7 @@ code {
   user-select: none;
   transition: border-color .15s, background .15s;
 }
-.block-chip:hover { border-color: var(--accent); background: #10201a; }
+.block-chip:hover { border-color: var(--accent); background: var(--active-bg); }
 .block-chip:active { cursor: grabbing; }
 .block-chip.used { opacity: .35; }
 
@@ -505,7 +559,7 @@ code {
   display: grid;
   gap: 6px;
   padding: 10px;
-  background: #0a1017;
+  background: var(--input-bg);
   border: 1px solid var(--line);
   border-radius: 8px;
   min-height: 60px;
@@ -518,8 +572,8 @@ code {
   align-items: center;
   justify-content: center;
   font-size: 11.5px;
-  color: #40566b;
-  border: 1px dashed #2a3f52;
+  color: var(--muted);
+  border: 1px dashed var(--line-strong);
   border-radius: 6px;
   transition: border-color .12s, background .12s;
 }
@@ -530,8 +584,8 @@ code {
 }
 
 .grid-slot.filled {
-  border: 1px solid #2f4a5f;
-  background: #101a24;
+  border: 1px solid var(--line-strong);
+  background: var(--hover-bg);
   color: var(--text);
   cursor: pointer;
   justify-content: space-between;

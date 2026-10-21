@@ -140,6 +140,9 @@ public sealed class OverlaySettings
     public bool StartMinimizedToTray { get; set; } = true;
     public bool LaunchElectronUi { get; set; } = true;
 
+    /// <summary>主界面（Electron 窗口）主题："dark" 或 "light"。</summary>
+    public string UiTheme { get; set; } = "dark";
+
     /// <summary>
     /// 程序自身进程优先级：Normal / AboveNormal / High。
     /// 调高能让采集线程更及时处理 ETW 事件，代价是多占一点 CPU 时间片。

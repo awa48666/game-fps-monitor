@@ -251,6 +251,25 @@ public sealed class AppHost : IDisposable
                     OpenRecordsFolder();
                     break;
 
+                case "deleteSession":
+                    // data: { startedAt, endedAt, gameName, csvFile }
+                    if (doc.RootElement.TryGetProperty("data", out var delEl))
+                    {
+                        var target = delEl.Deserialize<SessionRecord>(JsonOpts);
+                        bool ok = target != null && (_recorder?.DeleteSession(target) ?? false);
+                        _ipc?.Broadcast(JsonSerializer.Serialize(
+                            new { type = "sessionDeleted", data = new { ok } }, JsonOpts));
+                        if (ok) SendSessions();
+                    }
+                    break;
+
+                case "clearSessions":
+                    int cleared = _recorder?.ClearHistory() ?? 0;
+                    _ipc?.Broadcast(JsonSerializer.Serialize(
+                        new { type = "sessionsCleared", data = new { count = cleared } }, JsonOpts));
+                    SendSessions();
+                    break;
+
                 case "setSettings":
                     if (doc.RootElement.TryGetProperty("data", out var dataEl))
                     {

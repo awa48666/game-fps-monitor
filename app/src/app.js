@@ -297,6 +297,7 @@ function renderHistory(list) {
 
   listEl.innerHTML = list.map((r, i) => `
     <div class="hist-card" data-idx="${i}" title="点击查看该场详情与逐帧曲线">
+      <button class="hist-del" data-idx="${i}" title="删除这条记录">✕</button>
       <div class="hist-head">
         <span class="hist-game">${esc(r.gameName || '未知')}</span>
         <span class="hist-time mono">${esc(r.endedAt || '')}</span>
@@ -315,6 +316,26 @@ function renderHistory(list) {
       listEl.querySelectorAll('.hist-card').forEach((x) => x.classList.remove('active'));
       el.classList.add('active');
       showDetail(history[Number(el.dataset.idx)]);
+    });
+  });
+
+  // 单条删除：别让点击冒泡到卡片（否则会顺带打开详情）
+  listEl.querySelectorAll('.hist-del').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const r = history[Number(btn.dataset.idx)];
+      if (!r) return;
+      const label = `${r.gameName || '未知'} · ${r.endedAt || ''}`;
+      if (!confirm(`确定删除这条记录吗？\n\n${label}\n\n对应的逐帧 CSV 也会一起删除。`)) return;
+      send({
+        type: 'deleteSession',
+        data: {
+          startedAt: r.startedAt,
+          endedAt: r.endedAt,
+          gameName: r.gameName,
+          csvFile: r.csvFile,
+        },
+      });
     });
   });
 }
@@ -394,10 +415,10 @@ function drawHistoryChart(list) {
   const w = Math.max(10, cssW - padL - padR);
   const h = Math.max(10, cssH - padT - padB);
 
-  ctx.strokeStyle = 'rgba(34,49,64,.9)';
+  ctx.strokeStyle = chartPalette.grid;
   ctx.lineWidth = 1;
   ctx.font = '11px Consolas, monospace';
-  ctx.fillStyle = '#7d93a8';
+  ctx.fillStyle = chartPalette.tick;
 
   const steps = 4;
   for (let i = 0; i <= steps; i++) {
@@ -438,7 +459,7 @@ function drawHistoryChart(list) {
     }
   }
 
-  ctx.fillStyle = '#7d93a8';
+  ctx.fillStyle = chartPalette.tick;
   if (n > 0) {
     ctx.textAlign = 'left';
     ctx.fillText((recent[0].endedAt || '').slice(5, 16), padL, padT + h + 17);
@@ -488,10 +509,10 @@ function drawDetailChart(data) {
   const w = Math.max(10, cssW - padL - padR);
   const h = Math.max(10, cssH - padT - padB);
 
-  ctx.strokeStyle = 'rgba(34,49,64,.9)';
+  ctx.strokeStyle = chartPalette.grid;
   ctx.lineWidth = 1;
   ctx.font = '11px Consolas, monospace';
-  ctx.fillStyle = '#7d93a8';
+  ctx.fillStyle = chartPalette.tick;
   const steps = 4;
   for (let i = 0; i <= steps; i++) {
     const y = padT + (h * i) / steps;
@@ -572,10 +593,10 @@ function drawChart(frameTimes, low1History, low01History) {
   const h = Math.max(10, cssH - padT - padB);
 
   // 网格与刻度
-  ctx.strokeStyle = 'rgba(34,49,64,.9)';
+  ctx.strokeStyle = chartPalette.grid;
   ctx.lineWidth = 1;
   ctx.font = '11px Consolas, monospace';
-  ctx.fillStyle = '#7d93a8';
+  ctx.fillStyle = chartPalette.tick;
   const steps = 4;
   for (let i = 0; i <= steps; i++) {
     const y = padT + (h * i) / steps;
@@ -669,10 +690,10 @@ function drawFrameTimeChart(frameTimes) {
   const w = Math.max(10, cssW - padL - padR);
   const h = Math.max(10, cssH - padT - padB);
 
-  ctx.strokeStyle = 'rgba(34,49,64,.9)';
+  ctx.strokeStyle = chartPalette.grid;
   ctx.lineWidth = 1;
   ctx.font = '11px Consolas, monospace';
-  ctx.fillStyle = '#7d93a8';
+  ctx.fillStyle = chartPalette.tick;
   const steps = 4;
   for (let i = 0; i <= steps; i++) {
     const y = padT + (h * i) / steps;
@@ -715,7 +736,7 @@ function drawFrameTimeChart(frameTimes) {
     const ya = yAt(ftAvg);
     ctx.save();
     ctx.setLineDash([5, 4]);
-    ctx.strokeStyle = '#7d93a8';
+    ctx.strokeStyle = chartPalette.avgLine;
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(padL, ya);
@@ -775,6 +796,7 @@ const FIELDS = [
   ['sessionIdleSeconds', 'number'],
   ['maxSessionsInHistory', 'number'],
   ['priorityClass', 'text'],
+  ['uiTheme', 'text'],
 ];
 
 /* ===================== 悬浮窗配色主题 ===================== */
@@ -836,6 +858,11 @@ function fillSettings(s) {
   // 主题选择器反映当前配色
   const themeSel = $('s-colorTheme');
   if (themeSel) themeSel.value = detectTheme(s);
+
+  // 主界面主题
+  applyUiTheme(s.uiTheme);
+  const uiThemeSel = $('s-uiTheme');
+  if (uiThemeSel) uiThemeSel.value = s.uiTheme === 'light' ? 'light' : 'dark';
 
   // 手动目标的进程名不在 FIELDS 里，由监控页顶部下拉框承载
   syncRangeLabels();
@@ -1084,18 +1111,37 @@ function blockAt(row, col) {
 
 /**
  * 放置一个块。放好后保证它的右侧和下方各有一个空槽（没有就扩展网格）。
+ * 同一类型只能占一个格子——拖到新位置等于从旧位置挪过来，
+ * 这样池子里的「已使用」标记始终与网格一致。
  */
 function placeBlock(type, row, col) {
-  gridState.blocks = gridState.blocks.filter((b) => !(b.row === row && b.col === col));
+  gridState.blocks = gridState.blocks.filter((b) => b.type !== type && !(b.row === row && b.col === col));
   gridState.blocks.push({ type, row, col });
   gridState.rows = Math.max(gridState.rows, row + 2);   // 下方留一格
   gridState.cols = Math.max(gridState.cols, col + 2);   // 右侧留一格
 }
 
+/**
+ * 移除块后把网格收回去：只留到"最右下那个块"再各多一格，
+ * 最少回到初始的 3 行 1 列。否则块越删越少、虚线框却一直留着。
+ */
+function shrinkGrid() {
+  let maxRow = -1;
+  let maxCol = -1;
+  for (const b of gridState.blocks) {
+    if (b.row > maxRow) maxRow = b.row;
+    if (b.col > maxCol) maxCol = b.col;
+  }
+  gridState.rows = Math.max(3, maxRow + 2);
+  gridState.cols = Math.max(1, maxCol + 2);
+}
+
 function removeBlock(row, col) {
   const before = gridState.blocks.length;
   gridState.blocks = gridState.blocks.filter((b) => !(b.row === row && b.col === col));
-  return gridState.blocks.length !== before;
+  if (gridState.blocks.length === before) return false;
+  shrinkGrid();
+  return true;
 }
 
 /** 渲染下方“数据块池”。 */
@@ -1141,7 +1187,12 @@ function renderGridEditor(onChange) {
                        + `<span class="slot-kind">R${r + 1}C${c + 1}</span>`;
         slot.title = '点击移除';
         slot.addEventListener('click', () => {
-          if (removeBlock(r, c)) { renderGridEditor(onChange); onChange(); }
+          if (removeBlock(r, c)) {
+            // 池子里的 used 状态依赖 blocks，移除后必须一起重绘，否则那块一直是灰的
+            renderGridEditor(onChange);
+            renderBlockPool(onChange);
+            onChange();
+          }
         });
       } else {
         slot.textContent = '拖到这里';
@@ -1177,6 +1228,21 @@ function renderGridEditor(onChange) {
   }
 }
 
+/* ===================== 主界面主题 ===================== */
+
+/** 把主题写到 <html data-theme>，CSS 变量会跟着切换。 */
+function applyUiTheme(theme) {
+  const t = theme === 'light' ? 'light' : 'dark';
+  document.documentElement.dataset.theme = t;
+
+  // 图表是用 canvas 画的，读不到 CSS 变量，这里给一份随主题变化的配色
+  chartPalette = t === 'light'
+    ? { grid: 'rgba(180,195,210,.75)', tick: '#64798c', avgLine: '#8fa4b6' }
+    : { grid: 'rgba(34,49,64,.9)', tick: '#7d93a8', avgLine: '#7d93a8' };
+}
+
+let chartPalette = { grid: 'rgba(34,49,64,.9)', tick: '#7d93a8', avgLine: '#7d93a8' };
+
 function syncRangeLabels() {  const pairs = [['scale', 2], ['backOpacity', 0], ['cornerRadius', 0], ['overlayChartHeight', 0]];
   for (const [key, digits] of pairs) {
     const el = $('s-' + key);
@@ -1205,6 +1271,13 @@ function init() {
   // 历史记录相关
   $('btn-refresh-history').addEventListener('click', () => send({ type: 'getSessions' }));
   $('btn-open-records').addEventListener('click', () => send({ type: 'openRecordsFolder' }));
+
+  $('btn-clear-history').addEventListener('click', () => {
+    const n = Array.isArray(history) ? history.length : 0;
+    if (n === 0) { alert('当前没有历史记录。'); return; }
+    if (!confirm(`确定清空全部 ${n} 条历史记录吗？\n\n所有逐帧 CSV 也会一起删除，此操作不可撤销。`)) return;
+    send({ type: 'clearSessions' });
+  });
   $('btn-close-detail').addEventListener('click', () => $('history-detail').classList.add('hidden'));
 
   // 监测目标（监控页顶部下拉框）
@@ -1317,6 +1390,18 @@ function init() {
       renderGridEditor(onGridChange);
       renderBlockPool(onGridChange);
       onGridChange();
+    });
+  }
+
+  // 界面主题：切换后立即生效并重绘图表
+  const uiThemeSel = $('s-uiTheme');
+  if (uiThemeSel) {
+    uiThemeSel.addEventListener('change', () => {
+      applyUiTheme(uiThemeSel.value);
+      const s = latest || {};
+      drawChart(s.recentFrameTimes || [], s.low1PercentHistory || [], s.low01PercentHistory || []);
+      drawFrameTimeChart(s.recentFrameTimes || []);
+      pushSettings(true);
     });
   }
 

@@ -121,6 +121,90 @@ public sealed class SessionRecorder
         }
     }
 
+    /// <summary>
+    /// 删除一条历史，连同它对应的逐帧 CSV。
+    /// SessionRecord 没有唯一 id，所以用「开始时间 + 结束时间 + 游戏名 + CSV 文件名」
+    /// 组合定位；这四项足以区分同一款游戏的不同场次。
+    /// </summary>
+    public bool DeleteSession(SessionRecord target)
+    {
+        if (target == null) return false;
+
+        lock (_lock)
+        {
+            var list = LoadHistoryUnlocked();
+            int idx = list.FindIndex(r =>
+                r.StartedAt == target.StartedAt &&
+                r.EndedAt == target.EndedAt &&
+                r.GameName == target.GameName &&
+                r.CsvFile == target.CsvFile);
+
+            if (idx < 0) return false;
+
+            var removed = list[idx];
+            list.RemoveAt(idx);
+
+            try
+            {
+                Directory.CreateDirectory(RootDir);
+                File.WriteAllText(HistoryFile,
+                    JsonSerializer.Serialize(list, JsonOpts), new UTF8Encoding(false));
+            }
+            catch
+            {
+                return false;
+            }
+
+            DeleteCsv(removed.CsvFile);
+            return true;
+        }
+    }
+
+    /// <summary>清空全部历史与逐帧 CSV，返回删掉的记录条数。</summary>
+    public int ClearHistory()
+    {
+        lock (_lock)
+        {
+            int count = LoadHistoryUnlocked().Count;
+
+            try
+            {
+                // 直接写空列表覆盖，比先删再建更稳（避免删失败后留下旧数据）
+                Directory.CreateDirectory(RootDir);
+                File.WriteAllText(HistoryFile,
+                    JsonSerializer.Serialize(new List<SessionRecord>(), JsonOpts),
+                    new UTF8Encoding(false));
+            }
+            catch { }
+
+            try
+            {
+                if (Directory.Exists(CsvDir))
+                {
+                    foreach (var f in Directory.GetFiles(CsvDir, "*.csv"))
+                    {
+                        try { File.Delete(f); } catch { }
+                    }
+                }
+            }
+            catch { }
+
+            return count;
+        }
+    }
+
+    private void DeleteCsv(string? csvFile)
+    {
+        if (string.IsNullOrWhiteSpace(csvFile)) return;
+        try
+        {
+            // 只取文件名，避免路径穿越
+            var path = Path.Combine(CsvDir, Path.GetFileName(csvFile));
+            if (File.Exists(path)) File.Delete(path);
+        }
+        catch { }
+    }
+
     private List<SessionRecord> LoadHistoryUnlocked()
     {
         try

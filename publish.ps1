@@ -47,13 +47,42 @@ if (-not (Test-Path $distSrc)) { throw "Electron runtime not found: $distSrc" }
 $distDst = Join-Path $appDst 'electron'
 Copy-Item $distSrc $distDst -Recurse -Force
 
-Write-Host '==> [4/4] trim locales'
+Write-Host '==> [4/5] trim locales'
 $locales = Join-Path $distDst 'locales'
 if (Test-Path $locales) {
     Get-ChildItem $locales -Filter '*.pak' | Where-Object {
         $_.Name -notin @('zh-CN.pak', 'en-US.pak')
     } | Remove-Item -Force -ErrorAction SilentlyContinue
 }
+
+# Slimming pass. Every item below was verified to keep the app launchable.
+# Do NOT add: dxcompiler.dll / dxil.dll / d3dcompiler_47.dll / resources.pak /
+# icudtl.dat / v8 snapshot / *.pak in electron root / resources\default_app.asar
+# -- the app fails to start without them (electron.exe exits with code 1).
+Write-Host '==> [5/5] slimming'
+$slim = @(
+    # pure-text license dump, 19 MB of HTML
+    (Join-Path $distDst 'LICENSES.chromium.html'),
+    # software Vulkan fallback, unused on any machine with a GPU
+    (Join-Path $distDst 'vk_swiftshader.dll'),
+    (Join-Path $distDst 'vk_swiftshader_icd.json'),
+    (Join-Path $distDst 'vulkan-1.dll'),
+    # designer + debug-symbol reader, not needed at runtime
+    (Join-Path $OutputDir 'System.Windows.Forms.Design.dll'),
+    (Join-Path $OutputDir 'Microsoft.DiaSymReader.Native.amd64.dll'),
+    # DIA native libs for other architectures
+    (Join-Path $OutputDir 'arm64'),
+    (Join-Path $OutputDir 'x86')
+)
+foreach ($p in $slim) {
+    if (Test-Path $p) { Remove-Item $p -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
+# .NET satellite resources: keep Chinese only
+$keepCultures = @('zh-Hans', 'zh-Hant', 'zh-CN', 'zh-TW')
+Get-ChildItem $OutputDir -Directory -ErrorAction SilentlyContinue | Where-Object {
+    $_.Name -match '^[a-z]{2}(-[A-Za-z]{2,4})?$' -and $keepCultures -notcontains $_.Name
+} | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 
 $size = (Get-ChildItem $OutputDir -Recurse -File | Measure-Object Length -Sum).Sum / 1MB
 Write-Host ''

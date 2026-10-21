@@ -112,6 +112,13 @@ public sealed class MonitorEngine : IDisposable
     private readonly ConcurrentDictionary<int, double> _lastFrameForSession = new();
     private int _currentSessionPid;
 
+    /// <summary>
+    /// 粘性监测目标：一旦认定某个游戏，只要它还在渲染就继续跟它，
+    /// 不会因为 alt-tab 到浏览器、动态壁纸刷新而被抢走。
+    /// 游戏退出或停止渲染后自动清空。
+    /// </summary>
+    private int _stickyGamePid;
+
     private Timer? _timer;
     private long _seq;
 
@@ -518,6 +525,31 @@ public sealed class MonitorEngine : IDisposable
     /// <summary>
     /// 选择"当前游戏"：优先前台窗口（且它确实在渲染），否则取帧率最高的活跃非系统进程。
     /// </summary>
+    /// <summary>
+    /// 已知的非游戏渲染进程。它们常年提交帧（动态壁纸、浏览器、桌面组件），
+    /// 不该被当成"游戏"抢走监测目标。
+    /// 仅用于判断"是否值得粘住"和"前台是不是另一个游戏"，
+    /// 不阻止它们被选中——万一你玩的真是网页游戏，仍可手动锁定。
+    /// </summary>
+    private static readonly string[] NonGameProcesses =
+    {
+        "wallpaper32", "wallpaper64",                      // Wallpaper Engine
+        "msedge", "chrome", "firefox", "brave", "opera",    // 浏览器
+        "msedgewebview2", "webviewhost",                    // WebView2 宿主
+        "explorer", "dwm", "SearchApp", "ShellExperienceHost", "StartMenuExperienceHost",
+        "ApplicationFrameHost", "LockApp", "TextInputHost",
+        "Code", "devenv", "rider64", "pycharm64",          // 编辑器
+        "GamePP", "NVIDIA Overlay", "Discord", "QQ", "WeChat",
+    };
+
+    private static bool IsNonGameProcess(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return false;
+        foreach (var n in NonGameProcesses)
+            if (string.Equals(name, n, StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
+    }
+
     private int PickGamePid(double now)
     {
         // 手动指定了目标就完全跳过自动检测
@@ -528,6 +560,28 @@ public sealed class MonitorEngine : IDisposable
         int fg = ProcessUtil.GetForegroundProcessId();
         string fgName = ProcessUtil.GetProcessName(fg);
         bool fgUsable = fg > 0 && !ProcessUtil.IsSystemProcess(fgName) && !IsSelfProcess(fg);
+
+        // ---- 粘性目标：上次认定的游戏只要还在渲染就继续跟它 ----
+        // 否则 alt-tab 到浏览器、动态壁纸刷帧时，监测目标会被反复抢走。
+        if (_stickyGamePid > 0)
+        {
+            bool alive = ProcessUtil.ProcessExists(_stickyGamePid);
+            bool rendering = _lastFrameTs.TryGetValue(_stickyGamePid, out var lastTs)
+                             && (now - lastTs) < 1500;
+
+            if (alive && rendering)
+            {
+                // 只有当前台冒出"另一个像游戏的进程"时才让位（比如换了款游戏）
+                bool fgIsAnotherGame = fgUsable
+                                       && fg != _stickyGamePid
+                                       && !IsNonGameProcess(fgName);
+                if (!fgIsAnotherGame) return _stickyGamePid;
+            }
+            else
+            {
+                _stickyGamePid = 0;      // 游戏退出或停止渲染，放弃粘性
+            }
+        }
 
         var active = new List<(int pid, double fps)>();
         foreach (var kv in _lastFrameTs)
@@ -542,8 +596,16 @@ public sealed class MonitorEngine : IDisposable
         }
 
         if (active.Count == 0) return 0;
-        if (fgUsable && active.Any(a => a.pid == fg)) return fg;
-        return active.OrderByDescending(a => a.fps).First().pid;
+
+        int picked = (fgUsable && active.Any(a => a.pid == fg))
+            ? fg
+            : active.OrderByDescending(a => a.fps).First().pid;
+
+        // 记住这次选中的目标（非游戏进程不粘，免得把浏览器钉死）
+        if (!IsNonGameProcess(ProcessUtil.GetProcessName(picked)))
+            _stickyGamePid = picked;
+
+        return picked;
     }
 
     public void Dispose()

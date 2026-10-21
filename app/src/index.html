@@ -127,6 +127,7 @@
           <span id="history-count" class="muted small"></span>
           <button id="btn-refresh-history" class="mini">刷新</button>
           <button id="btn-open-records" class="mini">打开记录文件夹</button>
+          <button id="btn-clear-history" class="mini danger">删除全部</button>
         </div>
       </div>
 
@@ -302,6 +303,13 @@
     <div class="card">
       <h3>性能</h3>
       <label class="row">
+        <span>界面主题</span>
+        <select id="s-uiTheme" class="text">
+          <option value="dark">深色</option>
+          <option value="light">浅色</option>
+        </select>
+      </label>
+      <label class="row">
         <span>程序优先级</span>
         <select id="s-priorityClass" class="text">
           <option value="Normal">正常</option>
@@ -310,7 +318,8 @@
         </select>
       </label>
       <p class="muted small">
-        调高可以让采集线程更及时处理事件，代价是多占一点 CPU 时间片，通常选「正常」即可。
+        「界面主题」只影响这个主窗口，悬浮窗配色在「位置与外观」里单独设置。<br>
+        「程序优先级」调高可以让采集线程更及时处理事件，代价是多占一点 CPU 时间片，通常选「正常」即可。
         不提供「实时」—— 那会把鼠标键盘的输入响应也挤掉。
       </p>
     </div>

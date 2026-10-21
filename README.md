@@ -13,14 +13,32 @@
 不想编译的话，去 **[Releases](https://github.com/awa48666/game-fps-monitor/releases/latest)** 下载：
 
 ```
-GameFPS-v1.0.5-win-x64.zip    约 190 MB
+GameFPS-v1.0.6-win-x64.zip    约 180 MB   （任何 Windows 直接解压）
+GameFPS-v1.0.6-win-x64.7z     约 117 MB   （体积更小，需 7-Zip 或 Win11）
 ```
 
 解压后双击 `GameFPS.exe` 即可。**包内已内置 .NET 10 与 Electron，不需要额外安装任何运行时。**
 
 <details>
+<summary>包体都花在哪了</summary>
+
+解压后约 403 MB，其中 `electron.exe` 单文件就占 235 MB（内含完整 Chromium 引擎），
+`dxcompiler.dll` 24.6 MB、`icudtl.dat` 10.4 MB、`resources.pak` 11.9 MB 也都是 Electron 启动必需，
+剩下的主要是 .NET 10 运行时（约 70 MB）。
+
+`publish.ps1` 会自动清掉一批确定无用的文件（Chromium 许可证 HTML 19.5 MB、软件 Vulkan 回退、
+WinForms 设计器、调试符号读取器、非中文卫星资源等），共省下约 48 MB。
+
+> 注意：`dxcompiler.dll` / `d3dcompiler_47.dll` / `resources.pak` / `icudtl.dat` /
+> `resources\default_app.asar` 都不能删——删掉后 `electron.exe` 会直接以退出码 1 退出，
+> 界面完全不出现。
+
+</details>
+
+<details>
 <summary>版本历史</summary>
 
+- **v1.0.6** — 新增删除历史记录（单条 + 全部）；主界面浅色主题；游戏优先的粘性监测目标；包体瘦身约 48 MB
 - **v1.0.5** — 新增程序优先级（正常/高于正常/高）与浅色配色主题（白底深字）
 - **v1.0.4** — 数据改存 `%LOCALAPPDATA%`，更新软件不再丢失历史记录（旧数据自动迁移）
 - **v1.0.3** — 悬浮窗改为自由网格布局，设置页可拖拽编排（曲线也是独立块）
