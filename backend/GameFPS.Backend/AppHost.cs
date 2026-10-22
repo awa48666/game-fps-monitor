@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 using System.Text.Json;
 using System.Windows.Forms;
 using GameFPS.Core;
@@ -24,6 +25,7 @@ public sealed class AppHost : IDisposable
     private OverlaySettings _settings = new();
     private OverlayForm? _overlay;
     private CrosshairForm? _crosshair;
+    private CrosshairHold? _hold;
     private IpcServer? _ipc;
     private TrayHost? _tray;
     private HotkeyWindow? _hotkeys;
@@ -76,8 +78,10 @@ public sealed class AppHost : IDisposable
         {
             // 准星单独兜底：它挂了不该拖垮帧率监测这个主功能
             _crosshair = new CrosshairForm(_settings.Crosshair);
+            _hold = new CrosshairHold(_crosshair);
+            _hold.Apply(_settings.Crosshair);
         }
-        catch { _crosshair = null; }
+        catch { _crosshair = null; _hold = null; }
 
         try
         {
@@ -376,6 +380,16 @@ public sealed class AppHost : IDisposable
                     ToggleCrosshair();
                     break;
 
+                case "setCrosshairImage":
+                    // data: { name, dataUrl } —— 前端把预设图/自选图以 base64 dataURL 送进来
+                    if (doc.RootElement.TryGetProperty("data", out var imgEl))
+                    {
+                        string? imgName = imgEl.TryGetProperty("name", out var nEl) ? nEl.GetString() : null;
+                        string? dataUrl = imgEl.TryGetProperty("dataUrl", out var dEl) ? dEl.GetString() : null;
+                        SaveCrosshairImage(imgName, dataUrl);
+                    }
+                    break;
+
                 case "setCrosshairEnabled":
                     // data: { value: true } —— 只要开关位，参数沿用当前设置
                     if (doc.RootElement.TryGetProperty("value", out var cxEl))
@@ -384,6 +398,7 @@ public sealed class AppHost : IDisposable
                         _settings.Crosshair.Enabled = cxEl.ValueKind == JsonValueKind.True;
                         _settings.Save();
                         _crosshair?.Apply(_settings.Crosshair);
+                        _hold?.Apply(_settings.Crosshair);
                         SendSettings();
                     }
                     break;
@@ -419,6 +434,7 @@ public sealed class AppHost : IDisposable
         _settings.Save();
         _overlay?.UpdateSettings(_settings);
         _crosshair?.Apply(_settings.Crosshair);
+        _hold?.Apply(_settings.Crosshair);
         _hotkeys?.Apply(_settings);
         _tray?.SetOverlayChecked(_settings.OverlayEnabled);
         ApplyPriority();
@@ -466,6 +482,58 @@ public sealed class AppHost : IDisposable
         SendSettings();
     }
 
+    /// <summary>
+    /// 保存前端送来的准星图片（内置预设图或用户自选图），落盘后写进设置并立即生效。
+    /// 目录：%LOCALAPPDATA%\GameFPS\crosshair\ —— 图片必须落在本地磁盘上，
+    /// 这样关掉界面、甚至把前端进程杀了，准星照样能画出来。
+    /// </summary>
+    private void SaveCrosshairImage(string? name, string? dataUrl)
+    {
+        if (string.IsNullOrWhiteSpace(dataUrl)) return;
+
+        try
+        {
+            int comma = dataUrl.IndexOf(',');
+            string b64 = comma >= 0 ? dataUrl[(comma + 1)..] : dataUrl;
+            byte[] bytes = Convert.FromBase64String(b64);
+            if (bytes.Length == 0) return;
+
+            string dir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "GameFPS", "crosshair");
+            Directory.CreateDirectory(dir);
+
+            string path = Path.Combine(dir, SafeFileName(name));
+            File.WriteAllBytes(path, bytes);
+
+            _settings.Crosshair ??= new CrosshairSettings();
+            _settings.Crosshair.UseCustomImage = true;
+            _settings.Crosshair.CustomImagePath = path;
+            _settings.Crosshair.Enabled = true;
+            _settings.Save();
+
+            _crosshair?.Apply(_settings.Crosshair);
+            _hold?.Apply(_settings.Crosshair);
+            SendSettings();
+        }
+        catch
+        {
+            // 图片解不开就当没收到，前端还能重新选一次
+        }
+    }
+
+    /// <summary>只取文件名部分并替换非法字符，防止前端传来带路径的名字跳出目录。</summary>
+    private static string SafeFileName(string? name)
+    {
+        string raw = Path.GetFileName(string.IsNullOrWhiteSpace(name) ? "crosshair.png" : name);
+        var sb = new StringBuilder(raw.Length);
+        foreach (char c in raw)
+            sb.Append(Array.IndexOf(Path.GetInvalidFileNameChars(), c) >= 0 ? '_' : c);
+
+        string cleaned = sb.ToString().Trim();
+        return cleaned.Length == 0 ? "crosshair.png" : cleaned;
+    }
+
     /// <summary>切换准星显示。被全局热键、IPC 与界面开关共用。</summary>
     private void ToggleCrosshair()
     {
@@ -473,6 +541,7 @@ public sealed class AppHost : IDisposable
         _settings.Crosshair.Enabled = !_settings.Crosshair.Enabled;
         _settings.Save();
         _crosshair?.Apply(_settings.Crosshair);
+        _hold?.Apply(_settings.Crosshair);
         SendSettings();
     }
 
@@ -571,6 +640,7 @@ public sealed class AppHost : IDisposable
         try { _tray?.Dispose(); } catch { }
         try { _ipc?.Dispose(); } catch { }
         try { _overlay?.Dispose(); } catch { }
+        try { _hold?.Dispose(); } catch { }
         try { _crosshair?.Dispose(); } catch { }
 
         try

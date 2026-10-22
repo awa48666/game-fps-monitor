@@ -43,6 +43,30 @@ public sealed class CrosshairSettings
     /// <summary>显示器序号；-1 = 主显示器。</summary>
     public int MonitorIndex { get; set; } = -1;
 
+    /// <summary>
+    /// true = 用图片做准星，false = 按 Style 程序绘制。
+    /// 图片缺失或解码失败时自动退回程序绘制，不会留下一个看不见的准星。
+    /// </summary>
+    public bool UseCustomImage { get; set; } = false;
+
+    /// <summary>图片准星的本地绝对路径（PNG / JPG / BMP / GIF）。</summary>
+    public string? CustomImagePath { get; set; }
+
+    /// <summary>图片宽度作为准星边长；非正方形图片会被拉伸填满这个正方形。</summary>
+    public int ImageSize { get; set; } = 64;
+
+    /// <summary>
+    /// 按住模式：开启后准星只在按住 HoldKey 时出现（松手即隐藏），
+    /// 适合只在开镜/架枪时看准星的用法。
+    /// </summary>
+    public bool HoldEnabled { get; set; } = false;
+
+    /// <summary>按住模式的按键，支持键盘键（F8 / K）与鼠标键（Mouse1..Mouse5）。</summary>
+    public string HoldKey { get; set; } = "Mouse2";
+
+    /// <summary>按下后延迟多少毫秒才显示，0 = 立即显示（上限 10000）。</summary>
+    public int HoldDelayMs { get; set; } = 0;
+
     /// <summary>描边（放在准星本体下面，让准星在浅色场景里也能看清）。</summary>
     public bool OutlineEnabled { get; set; } = false;
 

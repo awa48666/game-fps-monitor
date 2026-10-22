@@ -2,6 +2,7 @@ using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
@@ -96,6 +97,14 @@ public sealed class CrosshairForm : Form
     /// <summary>0 = 无待处理重绘，1 = 已排队一次。用于合并高频 Apply（拖滑块）时的调用。</summary>
     private int _queued;
 
+    /// <summary>图片准星的解码缓存（避免每帧从磁盘重读）。</summary>
+    private Image? _image;
+    private string? _imagePath;
+    private DateTime _imageStamp;
+
+    /// <summary>按住模式下主键当前是否按住（由 CrosshairHold 驱动）。</summary>
+    private volatile bool _holdActive;
+
     public CrosshairForm(CrosshairSettings settings)
     {
         _settings = settings;
@@ -160,13 +169,25 @@ public sealed class CrosshairForm : Form
     {
         if (IsDisposed || !IsHandleCreated) return;
 
-        if (!_settings.Enabled)
+        // 按住模式开启时，只有主键按住期间才显示；Enabled 仍是总开关
+        bool visible = _settings.Enabled && (!_settings.HoldEnabled || _holdActive);
+        if (!visible)
         {
             Hide();
             return;
         }
 
         RenderAndShow();
+    }
+
+    /// <summary>
+    /// 按住模式：由 CrosshairHold 在按下/松开时调用，只改变可见性，不动 Enabled。
+    /// </summary>
+    public void SetHoldActive(bool active)
+    {
+        if (_holdActive == active) return;
+        _holdActive = active;
+        Apply(_settings);
     }
 
     private void RenderAndShow()
@@ -206,8 +227,15 @@ public sealed class CrosshairForm : Form
     /// 按 SVG 版的同一套几何画准星：所有尺寸都以准星中心为原点，
     /// extent 为半边长，窗口即 extent*2 见方。
     /// </summary>
-    private static Bitmap RenderBitmap(CrosshairSettings s, out int extent)
+    private Bitmap RenderBitmap(CrosshairSettings s, out int extent)
     {
+        // 图片准星优先；图丢了就直接按程序绘制画，别留一个空白窗口
+        if (s.UseCustomImage)
+        {
+            var img = LoadImage(s.CustomImagePath);
+            if (img != null) return RenderImageBitmap(s, img, out extent);
+        }
+
         int thickness = Math.Max(1, s.Thickness);
         int outline = s.OutlineEnabled && s.OutlineThickness > 0 ? s.OutlineThickness : 0;
         float halfOutline = thickness / 2f + outline;
@@ -323,6 +351,90 @@ public sealed class CrosshairForm : Form
 
     private static Color WithAlpha(Color c, int opacity)
         => Color.FromArgb(Math.Clamp(opacity, 0, 255), c.R, c.G, c.B);
+
+    // ---------- 图片准星 ----------
+
+    /// <summary>
+    /// 把图片拉成 ImageSize 见方的方块（与原版一致：不保持宽高比，方形窗口居中）。
+    /// 透明度通过 ColorMatrix 的 alpha 通道一次乘进去，避免逐像素再处理一遍。
+    /// </summary>
+    private static Bitmap RenderImageBitmap(CrosshairSettings s, Image img, out int extent)
+    {
+        int draw = Math.Max(1, s.ImageSize > 0 ? s.ImageSize : Math.Max(1, s.Size));
+        int side = Math.Max(draw + 16, 64);
+        extent = side / 2;
+
+        var bmp = new Bitmap(side, side, PixelFormat.Format32bppArgb);
+        using var g = Graphics.FromImage(bmp);
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+        g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+        g.Clear(Color.Transparent);
+
+        int x = (side - draw) / 2;
+        int y = (side - draw) / 2;
+
+        using var attrs = new ImageAttributes();
+        int opacity = Math.Clamp(s.Opacity, 0, 255);
+        if (opacity < 255)
+        {
+            var cm = new ColorMatrix { Matrix33 = opacity / 255f };
+            attrs.SetColorMatrix(cm, ColorMatrixFlag.Default, ColorAdjustType.Bitmap);
+        }
+
+        g.DrawImage(img, new Rectangle(x, y, draw, draw),
+            0, 0, img.Width, img.Height, GraphicsUnit.Pixel, attrs);
+
+        return bmp;
+    }
+
+    /// <summary>
+    /// 读取图片并缓存。先读进内存再解码：Image.FromFile 会长期锁住文件，
+    /// 用户换图/删图时那种锁会让操作静默失败。
+    /// </summary>
+    private Image? LoadImage(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return null;
+
+        DateTime stamp;
+        try { stamp = File.GetLastWriteTimeUtc(path); }
+        catch { return null; }
+
+        if (_image != null &&
+            string.Equals(_imagePath, path, StringComparison.OrdinalIgnoreCase) &&
+            _imageStamp == stamp)
+            return _image;
+
+        try
+        {
+            byte[] bytes = File.ReadAllBytes(path);
+            using var ms = new MemoryStream(bytes);
+            using var decoded = Image.FromStream(ms);
+            var copy = new Bitmap(decoded.Width, decoded.Height, PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(copy))
+                g.DrawImage(decoded, 0, 0, decoded.Width, decoded.Height);
+
+            _image?.Dispose();
+            _image = copy;
+            _imagePath = path;
+            _imageStamp = stamp;
+            return _image;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            _image?.Dispose();
+            _image = null;
+        }
+        base.Dispose(disposing);
+    }
 
     // ---------- 推送到屏幕 ----------
 

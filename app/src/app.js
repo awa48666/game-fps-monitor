@@ -772,13 +772,53 @@ const CX_COLOR_PRESETS = [
   '#ffff00', '#ffffff', '#ff8800', '#ff0088',
 ];
 
+/** 内置的图片准星（随前端打包，选中后由后端复制到本地磁盘）。 */
+const CX_PRESET_IMAGES = [
+  { file: 'cat.png',    name: 'Cat' },
+  { file: 'donk.png',   name: 'donk' },
+  { file: 's1mple.png', name: 's1mple' },
+  { file: 'ropz.png',   name: 'ropz' },
+  { file: 'MMW2.0.png', name: 'MMW 2.0' },
+  { file: 'SSCJ.png',   name: 'SSCJ' },
+  { file: 'TShape.png', name: 'T 字准星' },
+];
+
+/** 图片准星在 Style 字段里用的前缀（后端只在程序绘制时读 Style）。 */
+const CX_PRESET_PREFIX = 'Preset_';
+
+/** 用户预设的本地存储键；一个预设 = 一份完整的准星设置快照。 */
+const CX_PRESETS_KEY = 'gfps.cxPresets';
+
+/** 预览图片的本地缓存键前缀（按图片文件名存 dataURL，重启后预览还在）。 */
+const CX_IMG_CACHE_PREFIX = 'gfps.cxImg:';
+
 /** 当前选中的样式（不在 settings.crosshair 里存 UI 态以外的东西） */
 let cxStyle = 'Cross';
 
+/** 渲染方式：'procedural' 程序绘制 / 'preset' 内置预设图 / 'custom' 用户图片。 */
+let cxMode = 'procedural';
+
+/** 当前图片准星的本地路径（后端最后落盘的那个）。 */
+let cxImagePath = null;
+
+/** 当前预设图文件名（cxMode === 'preset' 时有效）。 */
+let cxPresetFile = null;
+
+/** 预览用的已解码图片。 */
+let cxPreviewImage = null;
+let cxPreviewImageKey = null;
+
 /** 由 init() 注入：把准星改动防抖后下发给后端。 */
 let cxPush = null;
+/** 由 init() 注入：立即下发（点选类操作，不等防抖）。 */
+let cxPushNow = null;
+
 function pushCrosshair() {
   if (cxPush) cxPush();
+}
+
+function pushCrosshairNow() {
+  if (cxPushNow) cxPushNow();
 }
 
 /** 等待显示器列表就绪后再落位的显示器序号（见 fillCrosshair）。 */
@@ -823,13 +863,34 @@ function readCrosshair() {
   base.offsetX = num('cx-offset-x', base.offsetX ?? 0);
   base.offsetY = num('cx-offset-y', base.offsetY ?? 0);
   base.hotkeyToggle = val('cx-hotkey', base.hotkeyToggle || 'F8');
+
+  // ---- 渲染方式与图片 ----
+  base.useCustomImage = cxMode !== 'procedural';
+  base.style = cxMode === 'procedural'
+    ? cxStyle
+    : (cxPresetFile ? CX_PRESET_PREFIX + cxPresetFile : 'Custom');
+  base.imageSize = num('cx-image-size', base.imageSize ?? 64);
+  base.customImagePath = base.customImagePath ?? null;
+
+  // ---- 按住显示 ----
+  base.holdEnabled = $('cx-hold-enabled') ? $('cx-hold-enabled').checked : !!base.holdEnabled;
+  base.holdKey = val('cx-hold-key', base.holdKey || 'Mouse2');
+  base.holdDelayMs = num('cx-hold-delay', base.holdDelayMs ?? 0);
+
   return base;
 }
 
 /** 后端设置 → 界面控件（不含画布重绘，调用方决定何时画）。 */
 function fillCrosshair(c) {
   if (!c) return;
-  cxStyle = CX_STYLES.some((s) => s.id === c.style) ? c.style : 'Cross';
+
+  // 图片模式时 c.style 是 "Preset_xxx"，不能拿它覆盖程序绘制的样式选择
+  const isPresetStyle = typeof c.style === 'string' && c.style.startsWith(CX_PRESET_PREFIX);
+  if (!isPresetStyle && CX_STYLES.some((s) => s.id === c.style)) cxStyle = c.style;
+
+  cxImagePath = c.customImagePath || null;
+  cxPresetFile = isPresetStyle ? c.style.slice(CX_PRESET_PREFIX.length) : null;
+  cxMode = c.useCustomImage ? (cxPresetFile ? 'preset' : 'custom') : 'procedural';
 
   const set = (id, v) => { const el = $(id); if (el) el.value = v; };
   const check = (id, v) => { const el = $(id); if (el) el.checked = !!v; };
@@ -858,9 +919,20 @@ function fillCrosshair(c) {
   set('cx-offset-x', c.offsetX ?? 0);
   set('cx-offset-y', c.offsetY ?? 0);
   set('cx-hotkey', c.hotkeyToggle || 'F8');
+  set('cx-image-size', c.imageSize ?? 64);
+  check('cx-hold-enabled', c.holdEnabled);
+  set('cx-hold-key', c.holdKey || 'Mouse2');
+  set('cx-hold-delay', c.holdDelayMs ?? 0);
+
+  const nameEl = $('cx-image-name');
+  if (nameEl) nameEl.textContent = cxImagePath ? basenameOf(cxImagePath) : '未选择图片';
 
   renderCxStyleButtons();
   renderCxColors();
+  renderCxRenderMode();
+  renderCxPresetImages();
+  renderCxPresets();
+  refreshCxPreviewImage();
   syncCxLabels();
 }
 
@@ -868,6 +940,7 @@ function syncCxLabels() {
   const pairs = [
     ['cx-size', ''], ['cx-thickness', ''], ['cx-gap', ''],
     ['cx-dot', ''], ['cx-opacity', ''], ['cx-outline-thickness', ''],
+    ['cx-image-size', ''],
   ];
   for (const [id] of pairs) {
     const el = $(id);
@@ -961,6 +1034,336 @@ function renderDisplays(list) {
 }
 
 /** 画布预览：按与 C# 相同的几何实时还原准星外观。 */
+/** 取文件名部分（兼容 Windows 反斜杠路径）。 */
+function basenameOf(p) {
+  return String(p || '').split(/[\\/]/).pop();
+}
+
+/**
+ * 把 app/src 下的资源读成 dataURL。
+ * 页面以 file:// 加载，渲染进程里 fetch 本地文件会被 Chromium 拒绝，
+ * 所以优先走 preload 的 Node 桥；浏览器里直接打开时回落到相对 URL。
+ */
+function readAssetDataUrl(rel) {
+  try {
+    if (window.gamefps && typeof window.gamefps.readAssetDataUrl === 'function') {
+      return window.gamefps.readAssetDataUrl(rel);
+    }
+  } catch { /* 桥不可用就走回落分支 */ }
+  return null;
+}
+
+/** 渲染方式分段按钮：切换时同步面板可见性。 */
+function renderCxRenderMode() {
+  const seg = $('cx-render-mode');
+  if (seg) {
+    for (const btn of seg.querySelectorAll('.cx-seg')) {
+      btn.classList.toggle('active', btn.dataset.mode === cxMode);
+    }
+  }
+
+  const panel = $('cx-image-panel');
+  const note = $('cx-procedural-note');
+  if (panel) panel.hidden = cxMode === 'procedural';
+  if (note) note.hidden = cxMode !== 'procedural';
+
+  // 程序绘制的那几个参数在图片模式下不起作用，直接藏掉，免得误导
+  const styleBox = $('cx-styles');
+  if (styleBox) styleBox.hidden = cxMode !== 'procedural';
+}
+
+/** 内置预设图缩略图网格。 */
+function renderCxPresetImages() {
+  const box = $('cx-preset-images');
+  if (!box) return;
+  box.innerHTML = '';
+
+  for (const p of CX_PRESET_IMAGES) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'cx-preset-img' + (cxMode === 'preset' && cxPresetFile === p.file ? ' active' : '');
+    btn.title = p.name;
+    const img = document.createElement('img');
+    const thumbRel = `assets/crosshair-presets/${p.file}`;
+    img.src = readAssetDataUrl(thumbRel) || `./${thumbRel}`;
+    img.alt = p.name;
+    btn.appendChild(img);
+    const label = document.createElement('span');
+    label.textContent = p.name;
+    btn.appendChild(label);
+    btn.addEventListener('click', () => applyCxPresetImage(p.file));
+    box.appendChild(btn);
+  }
+}
+
+/** 选中内置预设图：把图片字节发给后端落盘，后端随即把路径写进设置。 */
+async function applyCxPresetImage(file) {
+  const rel = `assets/crosshair-presets/${file}`;
+  let dataUrl = readAssetDataUrl(rel);
+
+  if (!dataUrl) {
+    try {
+      const res = await fetch(`./${rel}`);
+      const blob = await res.blob();
+      dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    } catch (err) {
+      console.warn('预设图片加载失败', err);
+      return;
+    }
+  }
+
+  cxMode = 'preset';
+  cxPresetFile = file;
+  renderCxRenderMode();
+  renderCxPresetImages();
+  const nameEl = $('cx-image-name');
+  if (nameEl) nameEl.textContent = file;      // 后端回推路径之前先显示文件名
+  await sendCxImage(file, dataUrl);
+}
+
+/** 用户自选图片。 */
+function pickCxImage(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async () => {
+    cxMode = 'custom';
+    cxPresetFile = null;
+    renderCxRenderMode();
+    renderCxPresetImages();
+    const nameEl = $('cx-image-name');
+    if (nameEl) nameEl.textContent = file.name;
+    await sendCxImage(file.name, String(reader.result));
+  };
+  reader.readAsDataURL(file);
+}
+
+/**
+ * 把图片交给后端：后端解码后写到 %LOCALAPPDATA%\GameFPS\crosshair\，
+ * 再把 UseCustomImage / CustomImagePath 写进设置并回推 —— 前端不直接碰磁盘。
+ */
+async function sendCxImage(name, dataUrl) {
+  rememberCxImage(name, dataUrl);
+  send({ type: 'setCrosshairImage', data: { name, dataUrl } });
+  await refreshCxPreviewImage(name);
+  drawCrosshairPreview();
+}
+
+/** 按文件名缓存图片 dataURL，供预览与重启后复用。 */
+function rememberCxImage(name, dataUrl) {
+  try {
+    localStorage.setItem(CX_IMG_CACHE_PREFIX + basenameOf(name), dataUrl);
+  } catch { /* 配额满了就只丢了预览缓存 */ }
+}
+
+/** 载入预览图片：本地缓存优先，预设图回落到打包资源。 */
+function refreshCxPreviewImage(explicitName) {
+  let key = null;
+  let src = null;
+
+  if (cxMode === 'preset' && cxPresetFile) {
+    key = cxPresetFile;
+    src = localStorage.getItem(CX_IMG_CACHE_PREFIX + key)
+      || `./assets/crosshair-presets/${key}`;
+  } else if (cxMode === 'custom') {
+    key = explicitName ? basenameOf(explicitName) : (cxImagePath ? basenameOf(cxImagePath) : null);
+    if (key) src = localStorage.getItem(CX_IMG_CACHE_PREFIX + key);
+  }
+
+  if (!src) {
+    cxPreviewImage = null;
+    cxPreviewImageKey = null;
+    return;
+  }
+
+  if (cxPreviewImageKey === src) return;
+
+  const img = new Image();
+  img.onload = () => {
+    cxPreviewImage = img;
+    cxPreviewImageKey = src;
+    drawCrosshairPreview();
+  };
+  img.onerror = () => {
+    cxPreviewImage = null;
+    cxPreviewImageKey = null;
+    drawCrosshairPreview();
+  };
+  img.src = src;
+}
+
+// ---------- 我的预设 ----------
+
+function readCxPresets() {
+  try {
+    const raw = localStorage.getItem(CX_PRESETS_KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeCxPresets(list) {
+  try {
+    localStorage.setItem(CX_PRESETS_KEY, JSON.stringify(list));
+  } catch { /* 存不下就静默失败，不影响当前准星 */ }
+}
+
+/** 准星的出厂参数（「恢复默认」用）。 */
+function cxDefaults() {
+  return {
+    enabled: (settings && settings.crosshair && settings.crosshair.enabled) || false,
+    useCustomImage: false,
+    style: 'Cross',
+    size: 20,
+    thickness: 2,
+    color: '#ff0000',
+    gap: 0,
+    dotSize: 2,
+    opacity: 255,
+    imageSize: 64,
+    customImagePath: null,
+    monitorIndex: -1,
+    offsetX: 0,
+    offsetY: 0,
+    outlineEnabled: false,
+    outlineColor: '#000000',
+    outlineThickness: 1,
+    hotkeyToggle: 'F8',
+    holdEnabled: false,
+    holdKey: 'Mouse2',
+    holdDelayMs: 0,
+  };
+}
+
+function renderCxPresets() {
+  const box = $('cx-presets');
+  if (!box) return;
+
+  const list = readCxPresets();
+  box.innerHTML = '';
+
+  const empty = $('cx-presets-empty');
+  if (empty) empty.hidden = list.length > 0;
+
+  for (const preset of list) {
+    const card = document.createElement('div');
+    card.className = 'cx-preset-card';
+
+    const name = document.createElement('b');
+    name.textContent = preset.name;
+    card.appendChild(name);
+
+    const meta = document.createElement('span');
+    meta.className = 'muted small';
+    meta.textContent = describeCxPreset(preset.settings);
+    card.appendChild(meta);
+
+    const actions = document.createElement('div');
+    actions.className = 'cx-preset-actions';
+
+    const useBtn = document.createElement('button');
+    useBtn.type = 'button';
+    useBtn.className = 'mini';
+    useBtn.textContent = '应用';
+    useBtn.addEventListener('click', () => {
+      fillCrosshair(preset.settings);
+      drawCrosshairPreview();
+      pushCrosshairNow();
+    });
+
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'mini danger';
+    delBtn.textContent = '删除';
+    delBtn.addEventListener('click', () => {
+      writeCxPresets(readCxPresets().filter((p) => p.id !== preset.id));
+      renderCxPresets();
+    });
+
+    actions.appendChild(useBtn);
+    actions.appendChild(delBtn);
+    card.appendChild(actions);
+    box.appendChild(card);
+  }
+}
+
+function describeCxPreset(c) {
+  if (!c) return '';
+  if (c.useCustomImage) {
+    const file = String(c.style || '').startsWith(CX_PRESET_PREFIX)
+      ? String(c.style).slice(CX_PRESET_PREFIX.length)
+      : basenameOf(c.customImagePath || '自定义图片');
+    return `图片 · ${file}`;
+  }
+  const style = CX_STYLES.find((s) => s.id === c.style);
+  return `${style ? style.name : '十字'} · 大小 ${c.size} · ${c.color}`;
+}
+
+function saveCxPreset() {
+  const suggested = `准星 ${readCxPresets().length + 1}`;
+  const name = (window.prompt('预设名称', suggested) || '').trim();
+  if (!name) return;
+
+  const list = readCxPresets();
+  list.push({
+    id: `preset_${Date.now()}`,
+    name,
+    settings: readCrosshair(),
+  });
+  writeCxPresets(list);
+  renderCxPresets();
+}
+
+/**
+ * 按住键录制：键盘键走 keydown，鼠标键走 mousedown（右键要拦掉 contextmenu，
+ * 否则会同时弹出右键菜单）。输出与后端 CrosshairHold.ParseKey 对齐。
+ */
+function setupCxHoldRecorder() {
+  const el = $('cx-hold-key');
+  if (!el) return;
+
+  const commit = (token) => {
+    el.value = token;
+    pushCrosshairNow();
+  };
+
+  const keyToken = (e) => {
+    if (e.key === 'Escape' || e.key === 'Esc') { el.blur(); return null; }
+    if (e.key === ' ') return 'Space';
+    if (e.key.length === 1) return e.key.toUpperCase();
+    if (/^F\d{1,2}$/.test(e.key)) return e.key.toUpperCase();
+    const map = {
+      ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
+      Control: 'ControlKey', Shift: 'ShiftKey', Alt: 'Menu', Meta: 'LWin',
+      Enter: 'Return', Tab: 'Tab', Backspace: 'Back', Delete: 'Delete',
+      Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown',
+      Insert: 'Insert', CapsLock: 'CapsLock',
+    };
+    return map[e.key] || e.key;
+  };
+
+  el.addEventListener('keydown', (e) => {
+    e.preventDefault();
+    const token = keyToken(e);
+    if (token) commit(token);
+  });
+
+  el.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const map = { 0: 'Mouse1', 1: 'Mouse3', 2: 'Mouse2', 3: 'Mouse4', 4: 'Mouse5' };
+    const token = map[e.button];
+    if (token) commit(token);
+  });
+
+  el.addEventListener('contextmenu', (e) => e.preventDefault());
+}
+
 function drawCrosshairPreview() {
   const cv = $('cx-preview');
   if (!cv) return;
@@ -980,6 +1383,19 @@ function drawCrosshairPreview() {
   g.clearRect(0, 0, w, h);
 
   const s = readCrosshair();
+
+  // 图片准星：后端把图片拉伸成正方形画在 size×size 内，这里用同样的几何预览，
+  // 透明度也照样作用在图上，做到"预览即所见"。
+  if (cxMode !== 'procedural' && cxPreviewImage) {
+    const target = Math.max(8, Number(s.imageSize) || 64);
+    const scale = Math.min(1, (Math.min(w, h) - 24) / target);
+    const draw = target * scale;
+    g.globalAlpha = Math.max(0, Math.min(255, Number(s.opacity) || 0)) / 255;
+    g.drawImage(cxPreviewImage, (w - draw) / 2, (h - draw) / 2, draw, draw);
+    g.globalAlpha = 1;
+    return;
+  }
+
   const thickness = Math.max(1, s.thickness);
   const outline = s.outlineEnabled && s.outlineThickness > 0 ? s.outlineThickness : 0;
   const half = thickness / 2 + outline;
@@ -1691,6 +2107,7 @@ function init() {
   // 准星改动同样走热更新：拖滑块防抖，点选类立即下发
   cxPush = () => pushSettings(false);
   const cxNow = () => pushSettings(true);
+  cxPushNow = cxNow;
 
   for (const id of ['cx-size', 'cx-thickness', 'cx-gap', 'cx-dot', 'cx-opacity', 'cx-outline-thickness']) {
     const el = $(id);
@@ -1734,8 +2151,83 @@ function init() {
   const btnDisplays = $('btn-refresh-displays');
   if (btnDisplays) btnDisplays.addEventListener('click', () => send({ type: 'getDisplays' }));
 
+  // 渲染方式：程序绘制 / 预设图片 / 自定义图片
+  const cxModeBox = $('cx-render-mode');
+  if (cxModeBox) {
+    for (const btn of cxModeBox.querySelectorAll('.cx-seg')) {
+      btn.addEventListener('click', async () => {
+        const mode = btn.dataset.mode;
+        if (mode === cxMode) return;
+
+        if (mode === 'procedural') {
+          cxMode = 'procedural';
+          renderCxRenderMode();
+          renderCxPresetImages();
+          drawCrosshairPreview();
+          cxNow();
+        } else if (mode === 'preset') {
+          // 切到预设图时先挑一张，避免"切了模式但画面上没图"
+          await applyCxPresetImage(cxPresetFile || CX_PRESET_IMAGES[0].file);
+        } else {
+          const fileEl = $('cx-image-file');
+          if (fileEl) fileEl.click();
+        }
+      });
+    }
+  }
+
+  const cxImageSize = $('cx-image-size');
+  if (cxImageSize) {
+    cxImageSize.addEventListener('input', () => { syncCxLabels(); drawCrosshairPreview(); cxPush(); });
+    cxImageSize.addEventListener('change', () => { syncCxLabels(); drawCrosshairPreview(); cxNow(); });
+  }
+
+  const cxImageFile = $('cx-image-file');
+  if (cxImageFile) {
+    cxImageFile.addEventListener('change', () => {
+      const f = cxImageFile.files && cxImageFile.files[0];
+      if (f) pickCxImage(f);
+      cxImageFile.value = '';        // 允许连续选同一个文件
+    });
+  }
+
+  const btnPickImage = $('btn-cx-pick-image');
+  if (btnPickImage) {
+    btnPickImage.addEventListener('click', () => {
+      const el = $('cx-image-file');
+      if (el) el.click();
+    });
+  }
+
+  const cxHoldEnabledEl = $('cx-hold-enabled');
+  if (cxHoldEnabledEl) cxHoldEnabledEl.addEventListener('change', () => cxNow());
+
+  const cxHoldDelayEl = $('cx-hold-delay');
+  if (cxHoldDelayEl) {
+    cxHoldDelayEl.addEventListener('input', () => cxPush());
+    cxHoldDelayEl.addEventListener('change', () => cxNow());
+  }
+
+  setupCxHoldRecorder();
+
+  const btnSavePreset = $('btn-cx-save-preset');
+  if (btnSavePreset) btnSavePreset.addEventListener('click', saveCxPreset);
+
+  const btnResetCx = $('btn-cx-reset-default');
+  if (btnResetCx) {
+    btnResetCx.addEventListener('click', () => {
+      fillCrosshair(cxDefaults());
+      drawCrosshairPreview();
+      cxNow();
+    });
+  }
+
   renderCxStyleButtons();
   renderCxColors();
+  renderCxRenderMode();
+  renderCxPresetImages();
+  renderCxPresets();
+  refreshCxPreviewImage();
   syncCxLabels();
   drawCrosshairPreview();
 
