@@ -795,7 +795,7 @@ const CX_IMG_CACHE_PREFIX = 'gfps.cxImg:';
 /** 当前选中的样式（不在 settings.crosshair 里存 UI 态以外的东西） */
 let cxStyle = 'Cross';
 
-/** 渲染方式：'procedural' 程序绘制 / 'preset' 内置预设图 / 'custom' 用户图片。 */
+/** 渲染方式：'procedural' 程序绘制 / 'image' 图片绘制（内置预设或自选图片）。 */
 let cxMode = 'procedural';
 
 /** 当前图片准星的本地路径（后端最后落盘的那个）。 */
@@ -890,7 +890,7 @@ function fillCrosshair(c) {
 
   cxImagePath = c.customImagePath || null;
   cxPresetFile = isPresetStyle ? c.style.slice(CX_PRESET_PREFIX.length) : null;
-  cxMode = c.useCustomImage ? (cxPresetFile ? 'preset' : 'custom') : 'procedural';
+  cxMode = c.useCustomImage ? 'image' : 'procedural';
 
   const set = (id, v) => { const el = $(id); if (el) el.value = v; };
   const check = (id, v) => { const el = $(id); if (el) el.checked = !!v; };
@@ -1081,7 +1081,7 @@ function renderCxPresetImages() {
   for (const p of CX_PRESET_IMAGES) {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'cx-preset-img' + (cxMode === 'preset' && cxPresetFile === p.file ? ' active' : '');
+    btn.className = 'cx-preset-img' + (cxMode === 'image' && cxPresetFile === p.file ? ' active' : '');
     btn.title = p.name;
     const img = document.createElement('img');
     const thumbRel = `assets/crosshair-presets/${p.file}`;
@@ -1117,7 +1117,7 @@ async function applyCxPresetImage(file) {
     }
   }
 
-  cxMode = 'preset';
+  cxMode = 'image';
   cxPresetFile = file;
   renderCxRenderMode();
   renderCxPresetImages();
@@ -1131,7 +1131,7 @@ function pickCxImage(file) {
   if (!file) return;
   const reader = new FileReader();
   reader.onload = async () => {
-    cxMode = 'custom';
+    cxMode = 'image';
     cxPresetFile = null;
     renderCxRenderMode();
     renderCxPresetImages();
@@ -1165,13 +1165,15 @@ function refreshCxPreviewImage(explicitName) {
   let key = null;
   let src = null;
 
-  if (cxMode === 'preset' && cxPresetFile) {
-    key = cxPresetFile;
-    src = localStorage.getItem(CX_IMG_CACHE_PREFIX + key)
-      || `./assets/crosshair-presets/${key}`;
-  } else if (cxMode === 'custom') {
-    key = explicitName ? basenameOf(explicitName) : (cxImagePath ? basenameOf(cxImagePath) : null);
-    if (key) src = localStorage.getItem(CX_IMG_CACHE_PREFIX + key);
+  if (cxMode === 'image') {
+    if (cxPresetFile) {
+      key = cxPresetFile;
+      src = localStorage.getItem(CX_IMG_CACHE_PREFIX + key)
+        || `./assets/crosshair-presets/${key}`;
+    } else {
+      key = explicitName ? basenameOf(explicitName) : (cxImagePath ? basenameOf(cxImagePath) : null);
+      if (key) src = localStorage.getItem(CX_IMG_CACHE_PREFIX + key);
+    }
   }
 
   if (!src) {
@@ -1305,10 +1307,31 @@ function describeCxPreset(c) {
   return `${style ? style.name : '十字'} · 大小 ${c.size} · ${c.color}`;
 }
 
-function saveCxPreset() {
-  const suggested = `准星 ${readCxPresets().length + 1}`;
-  const name = (window.prompt('预设名称', suggested) || '').trim();
-  if (!name) return;
+/**
+ * 打开预设命名对话框。
+ * 注意不能用 window.prompt：Electron 渲染进程里 prompt 是被禁用的，
+ * 调用直接返回 null，表现就是"点了按钮没反应"。
+ */
+function openCxPresetDialog() {
+  const dlg = $('cx-preset-dialog');
+  const input = $('cx-preset-name');
+  if (!dlg || !input) return;
+
+  input.value = `准星 ${readCxPresets().length + 1}`;
+  dlg.hidden = false;
+  input.focus();
+  input.select();
+}
+
+function closeCxPresetDialog() {
+  const dlg = $('cx-preset-dialog');
+  if (dlg) dlg.hidden = true;
+}
+
+function commitCxPreset() {
+  const input = $('cx-preset-name');
+  const name = (input ? input.value : '').trim();
+  if (!name) { if (input) input.focus(); return; }
 
   const list = readCxPresets();
   list.push({
@@ -1318,6 +1341,7 @@ function saveCxPreset() {
   });
   writeCxPresets(list);
   renderCxPresets();
+  closeCxPresetDialog();
 }
 
 /**
@@ -2165,12 +2189,22 @@ function init() {
           renderCxPresetImages();
           drawCrosshairPreview();
           cxNow();
-        } else if (mode === 'preset') {
-          // 切到预设图时先挑一张，避免"切了模式但画面上没图"
-          await applyCxPresetImage(cxPresetFile || CX_PRESET_IMAGES[0].file);
+          return;
+        }
+
+        // 图片绘制：手上已有图（预设或自选）就直接沿用，没有就默认第一张预设，
+        // 免得"切过去了但画面上还是空参数"
+        if (cxPresetFile) {
+          await applyCxPresetImage(cxPresetFile);
+        } else if (cxImagePath) {
+          cxMode = 'image';
+          renderCxRenderMode();
+          renderCxPresetImages();
+          refreshCxPreviewImage();
+          drawCrosshairPreview();
+          cxNow();
         } else {
-          const fileEl = $('cx-image-file');
-          if (fileEl) fileEl.click();
+          await applyCxPresetImage(CX_PRESET_IMAGES[0].file);
         }
       });
     }
@@ -2211,11 +2245,33 @@ function init() {
   setupCxHoldRecorder();
 
   const btnSavePreset = $('btn-cx-save-preset');
-  if (btnSavePreset) btnSavePreset.addEventListener('click', saveCxPreset);
+  if (btnSavePreset) btnSavePreset.addEventListener('click', openCxPresetDialog);
+
+  const btnPresetOk = $('btn-cx-preset-ok');
+  if (btnPresetOk) btnPresetOk.addEventListener('click', commitCxPreset);
+
+  const btnPresetCancel = $('btn-cx-preset-cancel');
+  if (btnPresetCancel) btnPresetCancel.addEventListener('click', closeCxPresetDialog);
+
+  const presetNameEl = $('cx-preset-name');
+  if (presetNameEl) {
+    presetNameEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); commitCxPreset(); }
+      else if (e.key === 'Escape') { e.preventDefault(); closeCxPresetDialog(); }
+    });
+  }
+
+  const presetDlg = $('cx-preset-dialog');
+  if (presetDlg) {
+    presetDlg.addEventListener('click', (e) => {
+      if (e.target === presetDlg) closeCxPresetDialog();   // 点遮罩关闭
+    });
+  }
 
   const btnResetCx = $('btn-cx-reset-default');
   if (btnResetCx) {
     btnResetCx.addEventListener('click', () => {
+      closeCxPresetDialog();
       fillCrosshair(cxDefaults());
       drawCrosshairPreview();
       cxNow();

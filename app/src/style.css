@@ -813,3 +813,52 @@ code {
 }
 
 .mini.danger:hover { background: #3a1e1e; }
+
+/* 准星预设命名对话框（Electron 禁用了 window.prompt，只能自绘） */
+
+.cx-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.cx-dialog[hidden] { display: none !important; }
+
+.cx-dialog-box {
+  width: 320px;
+  padding: 16px 18px 14px;
+  border: 1px solid #2a2f38;
+  border-radius: 10px;
+  background: #171b22;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
+}
+
+.cx-dialog-box h4 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  color: #e6ebf3;
+}
+
+.cx-dialog-box input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.cx-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.mini.primary {
+  background: #2b6cff;
+  border-color: #2b6cff;
+  color: #fff;
+}
+
+.mini.primary:hover { background: #3a79ff; }

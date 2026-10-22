@@ -225,13 +225,13 @@
       <h3>渲染方式</h3>
       <div class="cx-segment" id="cx-render-mode">
         <button type="button" class="cx-seg active" data-mode="procedural">程序绘制</button>
-        <button type="button" class="cx-seg" data-mode="preset">预设图片</button>
-        <button type="button" class="cx-seg" data-mode="custom">自定义图片</button>
+        <button type="button" class="cx-seg" data-mode="image">图片绘制</button>
       </div>
 
       <div id="cx-image-panel" hidden>
-        <h4>预设图片</h4>
+        <h4>内置预设（点一下就换）</h4>
         <div class="cx-preset-images" id="cx-preset-images"></div>
+        <h4>自己的图片</h4>
 
         <div class="row">
           <span>图片尺寸</span>
@@ -338,6 +338,17 @@
         还没有预设。把准星调成喜欢的样子，点上面的「保存当前设置为准星预设」，
         之后一键切换；每个预设都会存下样式、尺寸、颜色、描边、图片与按住设置。
       </p>
+    </div>
+
+    <div class="cx-dialog" id="cx-preset-dialog" hidden>
+      <div class="cx-dialog-box">
+        <h4>保存准星预设</h4>
+        <input type="text" id="cx-preset-name" class="text" maxlength="30" placeholder="给这个预设起个名字">
+        <div class="cx-dialog-actions">
+          <button type="button" id="btn-cx-preset-cancel" class="mini">取消</button>
+          <button type="button" id="btn-cx-preset-ok" class="mini primary">保存</button>
+        </div>
+      </div>
     </div>
 
   </section>
