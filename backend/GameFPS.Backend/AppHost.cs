@@ -23,6 +23,7 @@ public sealed class AppHost : IDisposable
     private readonly MonitorEngine _engine = new();
     private OverlaySettings _settings = new();
     private OverlayForm? _overlay;
+    private CrosshairForm? _crosshair;
     private IpcServer? _ipc;
     private TrayHost? _tray;
     private HotkeyWindow? _hotkeys;
@@ -70,6 +71,13 @@ public sealed class AppHost : IDisposable
             StartError = $"创建游戏内悬浮窗失败：{ex.GetType().Name} {ex.Message}";
             return false;
         }
+
+        try
+        {
+            // 准星单独兜底：它挂了不该拖垮帧率监测这个主功能
+            _crosshair = new CrosshairForm(_settings.Crosshair);
+        }
+        catch { _crosshair = null; }
 
         try
         {
@@ -126,6 +134,7 @@ public sealed class AppHost : IDisposable
             _hotkeys = new HotkeyWindow(_settings);
             _hotkeys.ToggleOverlay += ToggleOverlay;
             _hotkeys.OpenMain += OpenMainUi;
+            _hotkeys.ToggleCrosshair += ToggleCrosshair;
             _hotkeys.HotkeyFailed += (hk, reason) =>
                 _ipc?.Broadcast(JsonSerializer.Serialize(
                     new { type = "hotkeyFailed", data = new { hotkey = hk, reason } }, JsonOpts));
@@ -174,6 +183,26 @@ public sealed class AppHost : IDisposable
         => _ipc?.Broadcast(JsonSerializer.Serialize(
                new { type = "candidates", data = _engine.GetCandidates() }, JsonOpts));
 
+    /// <summary>显示器列表，供准星页选择把准星放在哪块屏上。</summary>
+    private void SendDisplays()
+    {
+        var screens = Screen.AllScreens;
+        var list = new List<object>(screens.Length);
+        for (int i = 0; i < screens.Length; i++)
+        {
+            var sc = screens[i];
+            list.Add(new
+            {
+                index = i,
+                name = $"显示器 {i + 1}",
+                primary = sc.Primary,
+                width = sc.Bounds.Width,
+                height = sc.Bounds.Height,
+            });
+        }
+        _ipc?.Broadcast(JsonSerializer.Serialize(new { type = "displays", data = list }, JsonOpts));
+    }
+
     /// <summary>一场游戏结束且记录已落盘：托盘提示并通知界面刷新历史。</summary>
     private void OnSessionCompleted(SessionRecord record)
     {
@@ -220,8 +249,13 @@ public sealed class AppHost : IDisposable
                     SendSettings();
                     SendSessions();
                     SendCandidates();
+                    SendDisplays();
                     if (_last != null)
                         _ipc?.Broadcast(JsonSerializer.Serialize(new { type = "snapshot", data = _last }, JsonOpts));
+                    break;
+
+                case "getDisplays":
+                    SendDisplays();
                     break;
 
                 case "getCandidates":
@@ -338,6 +372,22 @@ public sealed class AppHost : IDisposable
                     ToggleOverlay();
                     break;
 
+                case "toggleCrosshair":
+                    ToggleCrosshair();
+                    break;
+
+                case "setCrosshairEnabled":
+                    // data: { value: true } —— 只要开关位，参数沿用当前设置
+                    if (doc.RootElement.TryGetProperty("value", out var cxEl))
+                    {
+                        _settings.Crosshair ??= new CrosshairSettings();
+                        _settings.Crosshair.Enabled = cxEl.ValueKind == JsonValueKind.True;
+                        _settings.Save();
+                        _crosshair?.Apply(_settings.Crosshair);
+                        SendSettings();
+                    }
+                    break;
+
                 case "setOverlayDragMode":
                     // data: { enabled: true } 进入拖动定位模式，false 退出
                     if (doc.RootElement.TryGetProperty("enabled", out var dragEl))
@@ -365,8 +415,10 @@ public sealed class AppHost : IDisposable
     private void ApplySettings(OverlaySettings settings)
     {
         _settings = settings;
+        _settings.Crosshair ??= new CrosshairSettings();   // 老配置或前端漏传时补齐
         _settings.Save();
         _overlay?.UpdateSettings(_settings);
+        _crosshair?.Apply(_settings.Crosshair);
         _hotkeys?.Apply(_settings);
         _tray?.SetOverlayChecked(_settings.OverlayEnabled);
         ApplyPriority();
@@ -411,6 +463,16 @@ public sealed class AppHost : IDisposable
         if (!_settings.OverlayEnabled) _overlay?.HideOverlay();
         else if (_last != null) _overlay?.ApplySnapshot(_last);
 
+        SendSettings();
+    }
+
+    /// <summary>切换准星显示。被全局热键、IPC 与界面开关共用。</summary>
+    private void ToggleCrosshair()
+    {
+        _settings.Crosshair ??= new CrosshairSettings();
+        _settings.Crosshair.Enabled = !_settings.Crosshair.Enabled;
+        _settings.Save();
+        _crosshair?.Apply(_settings.Crosshair);
         SendSettings();
     }
 
@@ -509,6 +571,7 @@ public sealed class AppHost : IDisposable
         try { _tray?.Dispose(); } catch { }
         try { _ipc?.Dispose(); } catch { }
         try { _overlay?.Dispose(); } catch { }
+        try { _crosshair?.Dispose(); } catch { }
 
         try
         {

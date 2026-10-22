@@ -615,3 +615,95 @@ code {
   color: var(--muted);
   margin-left: 6px;
 }
+
+/* ===================== 屏幕准星页 ===================== */
+
+.cx-layout {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 18px;
+  align-items: start;
+  margin-top: 12px;
+}
+
+.cx-preview-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+}
+
+/* 棋盘格底：让透明区域看得见，预览才不会被误当成纯色背景 */
+#cx-preview {
+  width: 260px;
+  height: 260px;
+  display: block;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background-color: var(--input-bg);
+  background-image:
+    linear-gradient(45deg, rgba(255, 255, 255, .05) 25%, transparent 25%, transparent 75%, rgba(255, 255, 255, .05) 75%),
+    linear-gradient(45deg, rgba(255, 255, 255, .05) 25%, transparent 25%, transparent 75%, rgba(255, 255, 255, .05) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+}
+
+.cx-preview-caption { text-align: center; }
+
+.cx-controls { min-width: 0; }
+.cx-controls h4:first-child { margin-top: 0; }
+
+.cx-styles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.cx-style {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--input-bg);
+  color: var(--muted);
+  cursor: pointer;
+  transition: border-color .12s, color .12s, background .12s;
+}
+
+.cx-style i {
+  font-style: normal;
+  font-size: 19px;
+  line-height: 1.1;
+}
+
+.cx-style span { font-size: 11px; }
+
+.cx-style:hover { border-color: var(--line-strong); color: var(--text); }
+
+.cx-style.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--active-bg);
+}
+
+.cx-colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 1;
+}
+
+.cx-swatch {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .35) inset;
+}
+
+.cx-swatch.active { border-color: var(--text); }

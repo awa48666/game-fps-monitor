@@ -12,7 +12,8 @@ let settings = null;
 /** 用户是否正在设置页的某个输入控件上操作（热更新时用来抑制回填）。 */
 function isEditingForm() {
   const el = document.activeElement;
-  if (!el || !el.id || !el.id.startsWith('s-')) return false;
+  // cx- 是准星页的控件；同样不能在拖动时被打断
+  if (!el || !el.id || !(el.id.startsWith('s-') || el.id.startsWith('cx-'))) return false;
   const tag = el.tagName;
   return tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA';
 }
@@ -71,6 +72,9 @@ function dispatch(msg) {
       // 热更新模式下后端会把自己的改动广播回来；此时若用户正在某个输入框里打字，
       // 回填会打断输入（光标跳走、滑块回弹），所以有焦点时不回填。
       if (!isEditingForm()) fillSettings(settings);
+      break;
+    case 'displays':
+      renderDisplays(msg.data);
       break;
     case 'sessions':
       renderHistory(Array.isArray(msg.data) ? msg.data : []);
@@ -751,6 +755,320 @@ function drawFrameTimeChart(frameTimes) {
   }
 }
 
+/* ===================== 屏幕准星 ===================== */
+
+/** 与 C# CrosshairForm 的绘制分支一一对应。 */
+const CX_STYLES = [
+  { id: 'Cross',       icon: '+',  name: '十字' },
+  { id: 'Dot',         icon: '●',  name: '圆点' },
+  { id: 'Circle',      icon: '○',  name: '圆环' },
+  { id: 'CrossDot',    icon: '✚',  name: '十字+点' },
+  { id: 'CircleCross', icon: '⊕',  name: '圆环+十字' },
+  { id: 'DotBox',      icon: '▣',  name: '方框+点' },
+];
+
+const CX_COLOR_PRESETS = [
+  '#ff0000', '#00ff00', '#0000ff', '#00ffff', '#ff00ff',
+  '#ffff00', '#ffffff', '#ff8800', '#ff0088',
+];
+
+/** 当前选中的样式（不在 settings.crosshair 里存 UI 态以外的东西） */
+let cxStyle = 'Cross';
+
+/** 由 init() 注入：把准星改动防抖后下发给后端。 */
+let cxPush = null;
+function pushCrosshair() {
+  if (cxPush) cxPush();
+}
+
+/** 等待显示器列表就绪后再落位的显示器序号（见 fillCrosshair）。 */
+let cxMonitorPending = null;
+
+function cxColor(hex, opacity) {
+  const h = String(hex || '#ff0000').replace('#', '');
+  const r = parseInt(h.slice(0, 2), 16) || 0;
+  const g = parseInt(h.slice(2, 4), 16) || 0;
+  const b = parseInt(h.slice(4, 6), 16) || 0;
+  const a = Math.max(0, Math.min(255, Number(opacity) || 0)) / 255;
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+/** 从界面读出完整的准星设置；缺的字段沿用后端当前值。 */
+function readCrosshair() {
+  const base = Object.assign({}, (settings && settings.crosshair) || {});
+  const val = (id, fallback) => {
+    const el = $(id);
+    return el ? el.value : fallback;
+  };
+  const num = (id, fallback) => {
+    const raw = val(id, '');
+    // 空字符串不能当 0 —— Number('') 是 0，会把没设置过的控件读成 0
+    if (raw === '' || raw === null || raw === undefined) return fallback;
+    const n = Number(raw);
+    return isFinite(n) ? n : fallback;
+  };
+
+  base.enabled = $('cx-enabled') ? $('cx-enabled').checked : !!base.enabled;
+  base.style = cxStyle;
+  base.size = num('cx-size', base.size ?? 20);
+  base.thickness = num('cx-thickness', base.thickness ?? 2);
+  base.gap = num('cx-gap', base.gap ?? 0);
+  base.dotSize = num('cx-dot', base.dotSize ?? 2);
+  base.opacity = num('cx-opacity', base.opacity ?? 255);
+  base.color = val('cx-color', base.color || '#ff0000');
+  base.outlineEnabled = $('cx-outline-enabled') ? $('cx-outline-enabled').checked : !!base.outlineEnabled;
+  base.outlineColor = val('cx-outline-color', base.outlineColor || '#000000');
+  base.outlineThickness = num('cx-outline-thickness', base.outlineThickness ?? 1);
+  base.monitorIndex = num('cx-monitor', base.monitorIndex ?? -1);
+  base.offsetX = num('cx-offset-x', base.offsetX ?? 0);
+  base.offsetY = num('cx-offset-y', base.offsetY ?? 0);
+  base.hotkeyToggle = val('cx-hotkey', base.hotkeyToggle || 'F8');
+  return base;
+}
+
+/** 后端设置 → 界面控件（不含画布重绘，调用方决定何时画）。 */
+function fillCrosshair(c) {
+  if (!c) return;
+  cxStyle = CX_STYLES.some((s) => s.id === c.style) ? c.style : 'Cross';
+
+  const set = (id, v) => { const el = $(id); if (el) el.value = v; };
+  const check = (id, v) => { const el = $(id); if (el) el.checked = !!v; };
+
+  check('cx-enabled', c.enabled);
+  set('cx-size', c.size ?? 20);
+  set('cx-thickness', c.thickness ?? 2);
+  set('cx-gap', c.gap ?? 0);
+  set('cx-dot', c.dotSize ?? 2);
+  set('cx-opacity', c.opacity ?? 255);
+  set('cx-color', c.color || '#ff0000');
+  check('cx-outline-enabled', c.outlineEnabled);
+  set('cx-outline-color', c.outlineColor || '#000000');
+  set('cx-outline-thickness', c.outlineThickness ?? 1);
+  // 显示器下拉的选项由 displays 消息单独填充，可能与 settings 一先一后到达。
+  // 选项还没建好时给 select 设一个不存在的值会被浏览器置成空串，
+  // 结果就是"选的 2 号屏"被悄悄改回主屏 —— 这里先把它存起来，等列表到了再落位。
+  const monEl = $('cx-monitor');
+  const wantMon = String(c.monitorIndex ?? -1);
+  if (monEl && [...monEl.options].some((o) => o.value === wantMon)) {
+    monEl.value = wantMon;
+    cxMonitorPending = null;
+  } else {
+    cxMonitorPending = wantMon;
+  }
+  set('cx-offset-x', c.offsetX ?? 0);
+  set('cx-offset-y', c.offsetY ?? 0);
+  set('cx-hotkey', c.hotkeyToggle || 'F8');
+
+  renderCxStyleButtons();
+  renderCxColors();
+  syncCxLabels();
+}
+
+function syncCxLabels() {
+  const pairs = [
+    ['cx-size', ''], ['cx-thickness', ''], ['cx-gap', ''],
+    ['cx-dot', ''], ['cx-opacity', ''], ['cx-outline-thickness', ''],
+  ];
+  for (const [id] of pairs) {
+    const el = $(id);
+    const out = $(id + '-val');
+    if (el && out) out.textContent = el.value;
+  }
+}
+
+function renderCxStyleButtons() {
+  const box = $('cx-styles');
+  if (!box) return;
+  box.innerHTML = '';
+  for (const s of CX_STYLES) {
+    const btn = document.createElement('button');
+    btn.className = 'cx-style' + (s.id === cxStyle ? ' active' : '');
+    btn.type = 'button';
+    btn.dataset.style = s.id;
+    btn.innerHTML = `<i>${s.icon}</i><span>${s.name}</span>`;
+    btn.addEventListener('click', () => {
+      cxStyle = s.id;
+      renderCxStyleButtons();
+      drawCrosshairPreview();
+      pushCrosshair();
+    });
+    box.appendChild(btn);
+  }
+}
+
+function renderCxColors() {
+  const box = $('cx-colors');
+  if (!box) return;
+  const current = ($('cx-color') && $('cx-color').value || '').toLowerCase();
+  box.innerHTML = '';
+  for (const c of CX_COLOR_PRESETS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'cx-swatch' + (c === current ? ' active' : '');
+    b.style.background = c;
+    b.title = c;
+    b.addEventListener('click', () => {
+      if ($('cx-color')) $('cx-color').value = c;
+      renderCxColors();
+      drawCrosshairPreview();
+      pushCrosshair();
+    });
+    box.appendChild(b);
+  }
+}
+
+/** 显示器下拉框。value 用 -1 表示主显示器。 */
+function renderDisplays(list) {
+  const sel = $('cx-monitor');
+  if (!sel) return;
+
+  // 重建选项会把选择清掉，先把界面当前真正选中的那个记下来
+  const before = sel.value;
+  sel.innerHTML = '';
+
+  const auto = document.createElement('option');
+  auto.value = '-1';
+  auto.textContent = '主显示器（跟随系统）';
+  sel.appendChild(auto);
+
+  (Array.isArray(list) ? list : []).forEach((d) => {
+    const opt = document.createElement('option');
+    opt.value = String(d.index);
+    opt.textContent = `${d.name} · ${d.width}×${d.height}${d.primary ? ' · 主' : ''}`;
+    sel.appendChild(opt);
+  });
+
+  // 优先级：等列表落位的待定值 → 界面原本选中的 → 设置里的值 → 主屏。
+  // 待定值排在前面，因为它来自后端设置；此时下拉里往往只有默认的 "-1"，
+  // 那个 -1 只是 HTML 的初始项，不是用户的选择。
+  const has = (v) => [...sel.options].some((o) => o.value === v);
+  let wanted = null;
+
+  if (cxMonitorPending !== null && has(cxMonitorPending)) {
+    wanted = cxMonitorPending;
+  }
+  cxMonitorPending = null;
+
+  if (wanted === null && before && has(before)) wanted = before;
+
+  if (wanted === null) {
+    const fromSettings = String((settings && settings.crosshair && settings.crosshair.monitorIndex) ?? -1);
+    wanted = has(fromSettings) ? fromSettings : '-1';
+  }
+
+  sel.value = wanted;
+  if (sel.value !== wanted) sel.value = '-1';   // 该序号已不存在（拔了屏）→ 回主屏
+}
+
+/** 画布预览：按与 C# 相同的几何实时还原准星外观。 */
+function drawCrosshairPreview() {
+  const cv = $('cx-preview');
+  if (!cv) return;
+
+  const rect = cv.getBoundingClientRect();
+  const w = Math.max(1, Math.round(rect.width || 240));
+  const h = Math.max(1, Math.round(rect.height || 240));
+  const dpr = window.devicePixelRatio || 1;
+
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
+    cv.width = Math.round(w * dpr);
+    cv.height = Math.round(h * dpr);
+  }
+
+  const g = cv.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+
+  const s = readCrosshair();
+  const thickness = Math.max(1, s.thickness);
+  const outline = s.outlineEnabled && s.outlineThickness > 0 ? s.outlineThickness : 0;
+  const half = thickness / 2 + outline;
+  const span = Math.max(
+    s.gap + s.size + half,
+    s.size + half,
+    s.dotSize / 2 + outline,
+    3,
+  );
+
+  const scale = Math.min(1, (Math.min(w, h) / 2 - 10) / span);
+
+  g.save();
+  g.translate(w / 2, h / 2);
+  g.scale(scale, scale);
+  g.lineCap = 'round';
+  g.lineJoin = 'miter';
+
+  const main = cxColor(s.color, s.opacity);
+  const line = cxColor(s.outlineColor, s.opacity);
+  const size = Math.max(1, s.size);
+  const gap = Math.max(0, s.gap);
+  const dot = Math.max(0, s.dotSize);
+
+  const arms = (color, width) => {
+    g.strokeStyle = color;
+    g.lineWidth = width;
+    g.beginPath();
+    g.moveTo(0, -gap - size); g.lineTo(0, -gap);
+    g.moveTo(0, gap);         g.lineTo(0, gap + size);
+    g.moveTo(-gap - size, 0); g.lineTo(-gap, 0);
+    g.moveTo(gap, 0);         g.lineTo(gap + size, 0);
+    g.stroke();
+  };
+  const ring = (color, width, extra) => {
+    g.strokeStyle = color;
+    g.lineWidth = width;
+    g.beginPath();
+    g.arc(0, 0, size + extra, 0, Math.PI * 2);
+    g.stroke();
+  };
+  const boxRect = (color, width, extra) => {
+    g.strokeStyle = color;
+    g.lineWidth = width;
+    g.strokeRect(-(size + extra), -(size + extra), (size + extra) * 2, (size + extra) * 2);
+  };
+  const dotCircle = (color, d) => {
+    if (d <= 0) return;
+    g.fillStyle = color;
+    g.beginPath();
+    g.arc(0, 0, d / 2, 0, Math.PI * 2);
+    g.fill();
+  };
+
+  const ow = thickness + outline * 2;
+
+  switch (s.style) {
+    case 'Dot':
+      if (outline > 0) dotCircle(line, dot + outline * 2);
+      dotCircle(main, dot);
+      break;
+    case 'Circle':
+      if (outline > 0) ring(line, ow, outline);
+      ring(main, thickness, 0);
+      break;
+    case 'CrossDot':
+      if (outline > 0) { arms(line, ow); dotCircle(line, dot + outline * 2); }
+      arms(main, thickness);
+      dotCircle(main, dot);
+      break;
+    case 'CircleCross':
+      if (outline > 0) { ring(line, ow, outline); arms(line, ow); }
+      ring(main, thickness, 0);
+      arms(main, thickness);
+      break;
+    case 'DotBox':
+      if (outline > 0) { boxRect(line, ow, outline); dotCircle(line, dot + outline * 2); }
+      boxRect(main, thickness, 0);
+      dotCircle(main, dot);
+      break;
+    default:
+      if (outline > 0) arms(line, ow);
+      arms(main, thickness);
+      break;
+  }
+
+  g.restore();
+}
+
 /* ===================== 设置页 ===================== */
 
 const FIELDS = [
@@ -866,6 +1184,10 @@ function fillSettings(s) {
 
   // 手动目标的进程名不在 FIELDS 里，由监控页顶部下拉框承载
   syncRangeLabels();
+
+  // 准星页：控件回填 + 预览重绘
+  fillCrosshair(s.crosshair);
+  drawCrosshairPreview();
 }
 
 function collectSettings() {
@@ -895,6 +1217,9 @@ function collectSettings() {
   out.overlayBlocks = gridState.blocks.map((b) => ({ type: b.type, row: b.row, col: b.col }));
   out.gridRows = gridState.rows;
   out.gridCols = gridState.cols;
+
+  // 屏幕准星（嵌套对象，随设置一起往返）
+  out.crosshair = readCrosshair();
 
   return out;
 }
@@ -1265,6 +1590,11 @@ function init() {
       if (btn.dataset.page === 'history') send({ type: 'getSessions' });
       if (btn.dataset.page === 'settings') send({ type: 'getCandidates' });
       if (btn.dataset.page === 'monitor') send({ type: 'getCandidates' });
+      if (btn.dataset.page === 'crosshair') {
+        // 画布在隐藏页里量出来的尺寸是 0，显示后必须重画一次
+        send({ type: 'getDisplays' });
+        drawCrosshairPreview();
+      }
     });
   });
 
@@ -1355,6 +1685,59 @@ function init() {
   // 热键录制：点输入框后直接按组合键
   setupHotkeyRecorder($('s-hotkeyToggleOverlay'), pushSettings);
   setupHotkeyRecorder($('s-hotkeyOpenMain'), pushSettings);
+  setupHotkeyRecorder($('cx-hotkey'), pushSettings);
+
+  // ---------- 准星页 ----------
+  // 准星改动同样走热更新：拖滑块防抖，点选类立即下发
+  cxPush = () => pushSettings(false);
+  const cxNow = () => pushSettings(true);
+
+  for (const id of ['cx-size', 'cx-thickness', 'cx-gap', 'cx-dot', 'cx-opacity', 'cx-outline-thickness']) {
+    const el = $(id);
+    if (!el) continue;
+    el.addEventListener('input', () => { syncCxLabels(); drawCrosshairPreview(); cxPush(); });
+    el.addEventListener('change', () => { syncCxLabels(); drawCrosshairPreview(); cxNow(); });
+  }
+
+  for (const id of ['cx-offset-x', 'cx-offset-y']) {
+    const el = $(id);
+    if (!el) continue;
+    el.addEventListener('input', () => drawCrosshairPreview());
+    el.addEventListener('change', () => { drawCrosshairPreview(); cxNow(); });
+  }
+
+  const cxEnabledEl = $('cx-enabled');
+  if (cxEnabledEl) {
+    cxEnabledEl.addEventListener('change', () => { drawCrosshairPreview(); cxNow(); });
+  }
+
+  const cxColorEl = $('cx-color');
+  if (cxColorEl) {
+    cxColorEl.addEventListener('input', () => { renderCxColors(); drawCrosshairPreview(); cxPush(); });
+    cxColorEl.addEventListener('change', () => { renderCxColors(); drawCrosshairPreview(); cxNow(); });
+  }
+
+  const cxOutlineEl = $('cx-outline-enabled');
+  if (cxOutlineEl) {
+    cxOutlineEl.addEventListener('change', () => { drawCrosshairPreview(); cxNow(); });
+  }
+
+  const cxOutlineColorEl = $('cx-outline-color');
+  if (cxOutlineColorEl) {
+    cxOutlineColorEl.addEventListener('input', () => { drawCrosshairPreview(); cxPush(); });
+    cxOutlineColorEl.addEventListener('change', () => { drawCrosshairPreview(); cxNow(); });
+  }
+
+  const cxMonitorEl = $('cx-monitor');
+  if (cxMonitorEl) cxMonitorEl.addEventListener('change', () => cxNow());
+
+  const btnDisplays = $('btn-refresh-displays');
+  if (btnDisplays) btnDisplays.addEventListener('click', () => send({ type: 'getDisplays' }));
+
+  renderCxStyleButtons();
+  renderCxColors();
+  syncCxLabels();
+  drawCrosshairPreview();
 
   // 显示项：可勾选 + 拖动/箭头排序，改动即时下发
   renderOrderList((field, checked) => {
@@ -1436,6 +1819,7 @@ function init() {
     const s = latest || {};
     drawChart(s.recentFrameTimes || [], s.low1PercentHistory || [], s.low01PercentHistory || []);
     drawFrameTimeChart(s.recentFrameTimes || []);
+    drawCrosshairPreview();
   });
 
   // 支持用 #monitor / #history / #settings 直接打开对应页签

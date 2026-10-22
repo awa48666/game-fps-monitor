@@ -23,6 +23,7 @@
 <nav class="tabs">
   <button class="tab active" data-page="monitor">实时监控</button>
   <button class="tab" data-page="history">历史记录</button>
+  <button class="tab" data-page="crosshair">准星</button>
   <button class="tab" data-page="settings">设置</button>
 </nav>
 
@@ -158,6 +159,118 @@
         <div class="muted small" id="detail-chart-note"></div>
       </div>
       <div id="detail-body" class="detail-grid"></div>
+    </div>
+
+  </section>
+
+  <!-- ================= 准星 ================= -->
+  <section id="page-crosshair" class="page">
+
+    <div class="card">
+      <div class="card-head">
+        <h3>屏幕准星</h3>
+        <div class="card-head-actions">
+          <label class="toggle">
+            <input type="checkbox" id="cx-enabled">
+            <span>启用准星</span>
+          </label>
+        </div>
+      </div>
+      <p class="muted small">
+        准星是一块独立的分层小窗，画在选中显示器的正中央。它永远点击穿透、不抢焦点，
+        所以游戏里既不会挡住鼠标，也不会影响帧数。下面的改动都即时生效。
+      </p>
+
+      <div class="cx-layout">
+        <div class="cx-preview-wrap">
+          <canvas id="cx-preview"></canvas>
+          <div class="cx-preview-caption muted small">实时预览（棋盘格 = 透明区域）</div>
+        </div>
+
+        <div class="cx-controls">
+          <h4>样式</h4>
+          <div class="cx-styles" id="cx-styles"></div>
+
+          <h4>尺寸</h4>
+          <label class="row">
+            <span>大小</span>
+            <input type="range" id="cx-size" min="2" max="60" step="1" value="20">
+            <b id="cx-size-val" class="mono"></b>
+          </label>
+          <label class="row">
+            <span>线条粗细</span>
+            <input type="range" id="cx-thickness" min="1" max="10" step="1" value="2">
+            <b id="cx-thickness-val" class="mono"></b>
+          </label>
+          <label class="row">
+            <span>中心留空</span>
+            <input type="range" id="cx-gap" min="0" max="30" step="1" value="0">
+            <b id="cx-gap-val" class="mono"></b>
+          </label>
+          <label class="row">
+            <span>中心点大小</span>
+            <input type="range" id="cx-dot" min="0" max="12" step="1" value="2">
+            <b id="cx-dot-val" class="mono"></b>
+          </label>
+          <label class="row">
+            <span>不透明度</span>
+            <input type="range" id="cx-opacity" min="0" max="255" step="5" value="255">
+            <b id="cx-opacity-val" class="mono"></b>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>颜色</h3>
+      <div class="row">
+        <span>准星颜色</span>
+        <div class="cx-colors" id="cx-colors"></div>
+        <input type="color" id="cx-color" value="#ff0000">
+      </div>
+
+      <h4>轮廓</h4>
+      <label class="row toggle">
+        <input type="checkbox" id="cx-outline-enabled">
+        <span>给准星加描边（在浅色场景里更醒目）</span>
+      </label>
+      <div class="row">
+        <span>描边颜色</span>
+        <input type="color" id="cx-outline-color" value="#000000">
+        <span>描边粗细</span>
+        <input type="range" id="cx-outline-thickness" min="1" max="5" step="1" value="1">
+        <b id="cx-outline-thickness-val" class="mono"></b>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>位置与热键</h3>
+      <label class="row">
+        <span>显示器</span>
+        <select id="cx-monitor" class="text">
+          <option value="-1">主显示器（跟随系统）</option>
+        </select>
+        <button id="btn-refresh-displays" class="mini">刷新</button>
+      </label>
+      <label class="row">
+        <span>水平偏移</span>
+        <input type="number" id="cx-offset-x" class="num" step="1" value="0">
+        <span class="muted small">像素，正数向右；某些游戏的准星略偏，可在这里微调</span>
+      </label>
+      <label class="row">
+        <span>垂直偏移</span>
+        <input type="number" id="cx-offset-y" class="num" step="1" value="0">
+        <span class="muted small">正数向下</span>
+      </label>
+      <label class="row">
+        <span>显示/隐藏热键</span>
+        <input type="text" id="cx-hotkey" class="text mono hotkey-input"
+               value="F8" placeholder="点击后按下组合键" readonly>
+      </label>
+      <p class="muted small">
+        点输入框后直接按组合键录入，<code>Esc</code> 取消。默认 <code>F8</code> ——
+        <code>F9</code> 与 <code>Shift+F9</code> 已经给了悬浮窗和主界面。
+      </p>
     </div>
 
   </section>
