@@ -78,6 +78,17 @@ cd ..
 
 `publish.ps1` 会做四件事：publish C# 后端 → 拷贝前端 → 拷贝 Electron 运行时 → 裁剪语言包。
 
+**在 Linux 上交叉打包**（不需要 Windows 机器，产物与 `publish.ps1 -SelfContained` 等价）：
+
+```bash
+scripts/pack-linux.sh                # 产物在 .build/GameFPS/
+scripts/pack-linux.sh --to-share     # 顺带同步到共享目录 /mnt/hgfs/fps/GameFPS
+```
+
+它用 `dotnet publish -r win-x64 --self-contained` 交叉编译后端，再从 npmmirror 拉取
+win32-x64 的 Electron 运行时（首次约 120 MB，缓存在 `~/.cache/gamefps-pack/`），
+按同样的规则裁剪语言包与无用 DLL。包内 `版本.txt` 记录 tag、commit 与构建时间。
+
 ---
 
 ## 一、快速开始

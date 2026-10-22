@@ -16,6 +16,7 @@ pnpm-debug.log*
 # ===== 发布产物（体积大，走 Releases 分发）=====
 dist/
 publish/
+.build/
 *.exe
 *.dll
 *.nupkg
