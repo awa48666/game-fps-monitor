@@ -89,6 +89,10 @@ find "$OUT_DIR" -maxdepth 1 -type d -regextype posix-extended \
      ! -name 'zh-Hans' ! -name 'zh-Hant' ! -name 'zh-CN' ! -name 'zh-TW' \
      -exec rm -rf {} +
 
+# unzip 出来的 electron 文件带 555/444，这个权限会被 cp 带到共享盘上，
+# 下次同步就既删不掉也覆盖不了 —— 统一补一次可写位
+chmod -R u+rwX "$OUT_DIR" 2>/dev/null || true
+
 VERSION="$(cd "$ROOT" && git describe --tags --abbrev=0 2>/dev/null || echo dev)"
 COMMIT="$(cd "$ROOT" && git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 cat > "$OUT_DIR/版本.txt" <<EOF
@@ -103,10 +107,21 @@ say "done: $OUT_DIR  (${SIZE} MB, $VERSION)"
 # ---- optional: sync into the host shared folder -----------------------------
 if [ "$TO_SHARE" = 1 ]; then
     [ -d "$SHARE_DIR" ] || { echo "share dir missing: $SHARE_DIR" >&2; exit 1; }
+    STAGE="$SHARE_DIR/.GameFPS.new"
     say "sync -> $SHARE_DIR/GameFPS"
-    rm -rf "$SHARE_DIR/GameFPS.new"
-    cp -r "$OUT_DIR" "$SHARE_DIR/GameFPS.new"
-    rm -rf "$SHARE_DIR/GameFPS"
-    mv "$SHARE_DIR/GameFPS.new" "$SHARE_DIR/GameFPS"
-    say "synced: $SHARE_DIR/GameFPS/GameFPS.exe ($(du -sm "$SHARE_DIR/GameFPS" | cut -f1) MB)"
+    rm -rf "$STAGE" 2>/dev/null || true
+    cp -r "$OUT_DIR" "$STAGE"
+
+    # hgfs 上如果宿主正开着 GameFPS.exe，旧目录里的文件是锁住的，rm 会 EPERM。
+    # 这种情况下改落到带版本号的目录，保证这一次的包一样能双击运行。
+    if rm -rf "$SHARE_DIR/GameFPS" 2>/dev/null && mv "$STAGE" "$SHARE_DIR/GameFPS" 2>/dev/null; then
+        TARGET="$SHARE_DIR/GameFPS"
+        say "synced: $TARGET/GameFPS.exe ($(du -sm "$TARGET" | cut -f1) MB)"
+    else
+        TARGET="$SHARE_DIR/GameFPS-$VERSION"
+        rm -rf "$TARGET" 2>/dev/null || true
+        mv "$STAGE" "$TARGET"
+        say "旧目录被占用（宿主机上大概正开着 GameFPS.exe），本次输出到 $TARGET"
+        say "synced: $TARGET/GameFPS.exe ($(du -sm "$TARGET" | cut -f1) MB)"
+    fi
 fi
