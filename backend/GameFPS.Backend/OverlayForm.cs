@@ -300,11 +300,21 @@ public sealed class OverlayForm : Form
             case "gpu":
                 return ("GPU", BuildGpuText(s));
             case "pcore":
-                if (!s.HasHeterogeneousCores || s.PCoreFrequencyMHz <= 0) return ("", MatchNoValue);
-                return ("大核", $"{s.PCoreUsagePercent:0.0} %  {s.PCoreFrequencyMHz / 1000.0:0.00} GHz");
+                // 以前这里要求频率必须 >0 才显示整块，频率读不到时连占用率一起消失。
+                // 改成占用率为主体、频率有则追加，与竖排 / 横排两种样式保持一致。
+                if (!s.HasHeterogeneousCores) return ("", MatchNoValue);
+                {
+                    string p = $"{s.PCoreUsagePercent:0.0} %";
+                    if (s.PCoreFrequencyMHz > 0) p += $"  {s.PCoreFrequencyMHz / 1000.0:0.00} GHz";
+                    return ("大核", p);
+                }
             case "ecore":
-                if (!s.HasHeterogeneousCores || s.ECoreFrequencyMHz <= 0) return ("", MatchNoValue);
-                return ("小核", $"{s.ECoreUsagePercent:0.0} %  {s.ECoreFrequencyMHz / 1000.0:0.00} GHz");
+                if (!s.HasHeterogeneousCores) return ("", MatchNoValue);
+                {
+                    string e = $"{s.ECoreUsagePercent:0.0} %";
+                    if (s.ECoreFrequencyMHz > 0) e += $"  {s.ECoreFrequencyMHz / 1000.0:0.00} GHz";
+                    return ("小核", e);
+                }
             case "vram":
                 return ("显存", s.GpuMemoryMB.ToString("0") + " MB");
             case "memory":
@@ -335,10 +345,22 @@ public sealed class OverlayForm : Form
         if (_settings.ShowLow1) parts.Add("1% Low " + Fps(s.Low1PercentFps));
         if (_settings.ShowLow01) parts.Add("0.1% Low " + Fps(s.Low01PercentFps));
         if (_settings.ShowCpu) parts.Add("CPU " + BuildCpuText(s));
-        if (_settings.ShowPCore && s.HasHeterogeneousCores && s.PCoreFrequencyMHz > 0)
-            parts.Add("大核 " + s.PCoreUsagePercent.ToString("0") + "%");
-        if (_settings.ShowECore && s.HasHeterogeneousCores && s.ECoreFrequencyMHz > 0)
-            parts.Add("小核 " + s.ECoreUsagePercent.ToString("0") + "%");
+        // 大小核：占用率必给，频率有就带上。这里以前只拼占用率，
+        // 勾选「大核/小核」后横排样式永远看不到频率，和竖排样式不一致。
+        if (_settings.ShowPCore && s.HasHeterogeneousCores
+            && (s.PCoreUsagePercent > 0 || s.PCoreFrequencyMHz > 0))
+        {
+            string p = "大核 " + s.PCoreUsagePercent.ToString("0") + "%";
+            if (s.PCoreFrequencyMHz > 0) p += $" {s.PCoreFrequencyMHz / 1000.0:0.00}G";
+            parts.Add(p);
+        }
+        if (_settings.ShowECore && s.HasHeterogeneousCores
+            && (s.ECoreUsagePercent > 0 || s.ECoreFrequencyMHz > 0))
+        {
+            string e = "小核 " + s.ECoreUsagePercent.ToString("0") + "%";
+            if (s.ECoreFrequencyMHz > 0) e += $" {s.ECoreFrequencyMHz / 1000.0:0.00}G";
+            parts.Add(e);
+        }
         if (_settings.ShowGpu) parts.Add("GPU " + BuildGpuText(s));
         if (_settings.ShowGpuMemory && _settings.ShowVramTemperature && s.HasGpuMemoryTemperature)
             parts.Add("显存 " + s.GpuMemoryTemperatureC.ToString("0") + "°C");

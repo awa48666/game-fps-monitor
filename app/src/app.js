@@ -1388,6 +1388,56 @@ function setupCxHoldRecorder() {
   el.addEventListener('contextmenu', (e) => e.preventDefault());
 }
 
+/// 预览用的 alpha 能量补偿：与后端 PrepareSource + BoostAlpha 保持同一策略。
+/// 细线图（donk 只有 99 个非透明像素）一次性缩到 64px，覆盖率被插值摊到更大
+/// 面积上，单像素亮度掉光；按 alpha 总和补一个增益就恢复可见、且线条不会变粗。
+function downscaleForPreview(img, target) {
+  const w = img.naturalWidth || img.width;
+  const h = img.naturalHeight || img.height;
+  if (!w || !h || target >= w) return img;
+
+  try {
+    const c = document.createElement('canvas');
+    c.width = target;
+    c.height = target;
+    const cg = c.getContext('2d');
+    cg.imageSmoothingEnabled = true;
+    cg.imageSmoothingQuality = 'high';
+    cg.clearRect(0, 0, target, target);
+    cg.drawImage(img, 0, 0, target, target);
+
+    // 源图 alpha 总量（在后端是 ToBitmap 后逐像素累加，这里等价）
+    const srcCv = document.createElement('canvas');
+    srcCv.width = w;
+    srcCv.height = h;
+    const sg = srcCv.getContext('2d');
+    sg.drawImage(img, 0, 0, w, h);
+    const srcA = sg.getImageData(0, 0, w, h).data;
+
+    let srcEnergy = 0;
+    for (let i = 3; i < srcA.length; i += 4) srcEnergy += srcA[i];
+    if (srcEnergy <= 0) return c;
+
+    const dst = cg.getImageData(0, 0, target, target);
+    let dstEnergy = 0;
+    for (let i = 3; i < dst.data.length; i += 4) dstEnergy += dst.data[i];
+    if (dstEnergy <= 0) return c;
+
+    const gain = Math.min(8, srcEnergy / dstEnergy);
+    if (gain <= 1.05) return c;
+
+    for (let i = 3; i < dst.data.length; i += 4) {
+      const a = dst.data[i];
+      if (a === 0) continue;
+      dst.data[i] = Math.min(255, Math.round(a * gain));
+    }
+    cg.putImageData(dst, 0, 0);
+    return c;
+  } catch (e) {
+    return img;
+  }
+}
+
 function drawCrosshairPreview() {
   const cv = $('cx-preview');
   if (!cv) return;
@@ -1415,7 +1465,11 @@ function drawCrosshairPreview() {
     const scale = Math.min(1, (Math.min(w, h) - 24) / target);
     const draw = target * scale;
     g.globalAlpha = Math.max(0, Math.min(255, Number(s.opacity) || 0)) / 255;
-    g.drawImage(cxPreviewImage, (w - draw) / 2, (h - draw) / 2, draw, draw);
+    // 后端 RenderImageBitmap 会先把大图预缩到目标尺寸的 3 倍再画，
+    // 避免细线图（donk/s1mple/TShape 这类）被一次性双三次拉糊。
+    // 这里同样走一遍中间尺寸，否则预览会比实际准星更暗、更看不清。
+    const src = downscaleForPreview(cxPreviewImage, Math.round(draw));
+    g.drawImage(src, (w - draw) / 2, (h - draw) / 2, draw, draw);
     g.globalAlpha = 1;
     return;
   }

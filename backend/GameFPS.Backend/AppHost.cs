@@ -484,7 +484,7 @@ public sealed class AppHost : IDisposable
 
     /// <summary>
     /// 保存前端送来的准星图片（内置预设图或用户自选图），落盘后写进设置并立即生效。
-    /// 目录：%LOCALAPPDATA%\GameFPS\crosshair\ —— 图片必须落在本地磁盘上，
+    /// 目录：%LOCALAPPDATA%\GameFPSMonitor\crosshair\ —— 图片必须落在本地磁盘上，
     /// 这样关掉界面、甚至把前端进程杀了，准星照样能画出来。
     /// </summary>
     private void SaveCrosshairImage(string? name, string? dataUrl)
@@ -498,9 +498,8 @@ public sealed class AppHost : IDisposable
             byte[] bytes = Convert.FromBase64String(b64);
             if (bytes.Length == 0) return;
 
-            string dir = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "GameFPS", "crosshair");
+            // 与 settings.json / records 同一个数据根，避免两处目录分家
+            string dir = AppPaths.CrosshairImageDir;
             Directory.CreateDirectory(dir);
 
             string path = Path.Combine(dir, SafeFileName(name));

@@ -83,6 +83,16 @@ public sealed class CrosshairForm : Form
     private static extern bool UpdateLayeredWindow(IntPtr hwnd, IntPtr hdcDst, ref POINT pptDst,
         ref SIZE psize, IntPtr hdcSrc, ref POINT pptSrc, int crKey, ref BLENDFUNCTION pblend, int dwFlags);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter,
+        int X, int Y, int cx, int cy, uint uFlags);
+
+    private static readonly IntPtr HWND_TOPMOST = new(-1);
+    private const uint SWP_NOSIZE = 0x0001;
+    private const uint SWP_NOMOVE = 0x0002;
+    private const uint SWP_NOACTIVATE = 0x0010;
+    private const uint SWP_SHOWWINDOW = 0x0040;
+
     [DllImport("user32.dll")] private static extern IntPtr GetDC(IntPtr hWnd);
     [DllImport("user32.dll")] private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
     [DllImport("gdi32.dll")] private static extern IntPtr CreateCompatibleDC(IntPtr hdc);
@@ -105,6 +115,23 @@ public sealed class CrosshairForm : Form
     /// <summary>按住模式下主键当前是否按住（由 CrosshairHold 驱动）。</summary>
     private volatile bool _holdActive;
 
+    /// <summary>
+    /// 看门狗：每秒重新断言一次置顶并补推位图。
+    /// 准星平时不重绘，一旦被别的置顶窗口（游戏自带 overlay、播放器全屏条）
+    /// 压到下面、或 DWM 在显示模式切换后丢掉分层窗口位图，就会"显示一段时间
+    /// 之后再也不出现"，而没有任何事件能把它唤醒 —— 只能主动轮询纠正。
+    /// </summary>
+    private System.Windows.Forms.Timer? _watchdog;
+
+    /// <summary>连续渲染失败次数；用于把日志压成每条故障只记一次。</summary>
+    private int _failStreak;
+
+    /// <summary>上次成功推图的时间戳（Environment.TickCount64），供看门狗判断是否需要补推。</summary>
+    private long _lastPushAt;
+
+    /// <summary>看门狗把窗口从"不可见"救回来的累计次数，只用于日志节流。</summary>
+    private int _recoverCount;
+
     public CrosshairForm(CrosshairSettings settings)
     {
         _settings = settings;
@@ -118,7 +145,48 @@ public sealed class CrosshairForm : Form
         // 建句柄后才能推分层位图
         _ = Handle;
 
+        // 看门狗必须建在有消息循环的线程上，调用方（AppHost）就在 WinForms 主线程
+        _watchdog = new System.Windows.Forms.Timer { Interval = 1000 };
+        _watchdog.Tick += (_, _) => WatchdogTick();
+        _watchdog.Start();
+
         if (settings.Enabled) Apply(settings);
+    }
+
+    /// <summary>
+    /// 每秒一次的保活：可见时重申 TOPMOST 并重推一次位图。
+    /// 重推而不是只 SetWindowPos，是为了覆盖 DWM 丢位图的情况
+    /// （显卡驱动更新、分辨率/刷新率切换、独占全屏进出都会发生）。
+    /// </summary>
+    private void WatchdogTick()
+    {
+        if (IsDisposed || !IsHandleCreated) return;
+
+        bool shouldShow = _settings.Enabled && (!_settings.HoldEnabled || _holdActive);
+        if (!shouldShow) return;
+
+        try
+        {
+            // 窗口被压到别的 topmost 之下时，重新插到 topmost 链顶端。
+            // 这里必须记日志：这是"准星显示一段时间后自己不见了"的唯一可观测证据。
+            if (!Visible)
+            {
+                Show();
+                _recoverCount++;
+                if (_recoverCount <= 5)
+                    Log($"窗口已不可见，看门狗重新显示（累计 {_recoverCount} 次）");
+            }
+
+            SetWindowPos(Handle, HWND_TOPMOST, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+
+            // 每 5 秒补推一次位图，防止 DWM 侧内容丢失
+            if (Environment.TickCount64 - _lastPushAt >= 5000) RenderAndShow();
+        }
+        catch
+        {
+            // 看门狗自身绝不能让进程崩掉
+        }
     }
 
     protected override CreateParams CreateParams
@@ -196,21 +264,46 @@ public sealed class CrosshairForm : Form
 
         try
         {
-            var bmp = RenderBitmap(_settings, out _);
+            // using 而不是手工 Dispose：PushToScreen 在半途抛异常时，
+            // 下面那行 bmp.Dispose() 根本执行不到，看门狗开始补推后
+            // 就成了每 5 秒漏一张位图的稳定泄漏。
+            using var bmp = RenderBitmap(_settings, out _);
             var screen = TargetScreen(_settings);
 
             int left = screen.Bounds.X + (screen.Bounds.Width - bmp.Width) / 2 + _settings.OffsetX;
             int top = screen.Bounds.Y + (screen.Bounds.Height - bmp.Height) / 2 + _settings.OffsetY;
 
             PushToScreen(bmp, left, top);
-            bmp.Dispose();
+
+            _lastPushAt = Environment.TickCount64;
 
             if (!Visible) Show();
+
+            if (_failStreak > 0)
+            {
+                Log($"恢复渲染（此前连续失败 {_failStreak} 次）");
+                _failStreak = 0;
+            }
         }
-        catch
+        catch (Exception ex)
         {
-            // 显示器热插拔瞬间可能取不到屏幕，静默跳过这一次重绘
+            // 以前这里是全静默的 catch，结果"准星显示一段时间后消失"完全无从查起。
+            // 现在只记前 3 次，避免显示器热插拔时把日志刷爆。
+            _failStreak++;
+            if (_failStreak <= 3)
+                Log($"渲染失败 #{_failStreak}: {ex.GetType().Name}: {ex.Message}");
         }
+    }
+
+    private void Log(string msg)
+    {
+        try
+        {
+            var path = Path.Combine(AppContext.BaseDirectory, "crosshair.log");
+            File.AppendAllText(path,
+                $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {msg}{Environment.NewLine}");
+        }
+        catch { }
     }
 
     /// <summary>取准星要落在哪块屏幕上；序号越界时退回主屏。</summary>
@@ -357,6 +450,11 @@ public sealed class CrosshairForm : Form
     /// <summary>
     /// 把图片拉成 ImageSize 见方的方块（与原版一致：不保持宽高比，方形窗口居中）。
     /// 透明度通过 ColorMatrix 的 alpha 通道一次乘进去，避免逐像素再处理一遍。
+    ///
+    /// 细线图（donk / s1mple / TShape 这类 220x220 但非透明像素不足 120 个）
+    /// 直接缩到 64 px 时，线条覆盖率被插值摊薄成 alpha 极低的雾，预乘 Alpha 后
+    /// 屏幕上几乎看不见。这里按 alpha 总能量做补偿：缩放丢掉的覆盖率按比例
+    /// 补回去，线条亮度恢复而不会变粗。
     /// </summary>
     private static Bitmap RenderImageBitmap(CrosshairSettings s, Image img, out int extent)
     {
@@ -382,10 +480,113 @@ public sealed class CrosshairForm : Form
             attrs.SetColorMatrix(cm, ColorMatrixFlag.Default, ColorAdjustType.Bitmap);
         }
 
-        g.DrawImage(img, new Rectangle(x, y, draw, draw),
-            0, 0, img.Width, img.Height, GraphicsUnit.Pixel, attrs);
+        using var source = PrepareSource(img, draw);
+        g.DrawImage(source, new Rectangle(x, y, draw, draw),
+            0, 0, source.Width, source.Height, GraphicsUnit.Pixel, attrs);
 
         return bmp;
+    }
+
+    /// <summary>
+    /// 缩放并补偿 alpha 能量。细线条直接一次缩到 1/3 以下会被插值摊平成
+    /// alpha 极低的雾：总覆盖率没丢，只是被摊到了更大面积上，单像素亮度掉光。
+    /// 按"源图 alpha 总和 / 缩放后 alpha 总和"补一个增益（上限 8 倍，避免
+    /// 空白图被放大成噪声），线条就能恢复可见而不变粗。
+    /// </summary>
+    private static Bitmap PrepareSource(Image img, int target)
+    {
+        int w = img.Width, h = img.Height;
+        if (target >= w || w <= 0 || h <= 0) return ToBitmap(img);
+
+        var scaled = new Bitmap(target, target, PixelFormat.Format32bppArgb);
+        using (var g = Graphics.FromImage(scaled))
+        {
+            g.SmoothingMode = SmoothingMode.HighQuality;
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            g.CompositingQuality = CompositingQuality.HighQuality;
+            g.Clear(Color.Transparent);
+            g.DrawImage(img, new Rectangle(0, 0, target, target), 0, 0, w, h, GraphicsUnit.Pixel);
+        }
+
+        // 统一成 32bppArgb 后再逐像素补 alpha（源图可能是 24bpp 或带调色板）
+        using var src = ToBitmap(img);
+        try
+        {
+            BoostAlpha(scaled, src);
+        }
+        catch
+        {
+            // 补偿失败就用未补偿的缩放结果，至少还能画出东西
+        }
+
+        return scaled;
+    }
+
+    /// <summary>
+    /// 把 scaled 的 alpha 按 src 的 alpha 总量做比例补偿。
+    /// 两个位图尺寸不同，这里只比较总和，不需要逐像素对应。
+    /// </summary>
+    private static unsafe void BoostAlpha(Bitmap scaled, Bitmap src)
+    {
+        long srcEnergy = 0;
+        var rect = new Rectangle(0, 0, src.Width, src.Height);
+        var sd = src.LockBits(rect, ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+        try
+        {
+            byte* p = (byte*)sd.Scan0;
+            for (int y = 0; y < src.Height; y++)
+            {
+                byte* row = p + y * sd.Stride;
+                for (int x = 0; x < src.Width; x++)
+                    srcEnergy += row[x * 4 + 3];
+            }
+        }
+        finally { src.UnlockBits(sd); }
+
+        if (srcEnergy <= 0) return;
+
+        long dstEnergy = 0;
+        var rect2 = new Rectangle(0, 0, scaled.Width, scaled.Height);
+        var dd = scaled.LockBits(rect2, ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
+        try
+        {
+            byte* p = (byte*)dd.Scan0;
+            for (int y = 0; y < scaled.Height; y++)
+            {
+                byte* row = p + y * dd.Stride;
+                for (int x = 0; x < scaled.Width; x++)
+                    dstEnergy += row[x * 4 + 3];
+            }
+
+            if (dstEnergy <= 0) return;
+
+            double gain = Math.Min(8.0, (double)srcEnergy / dstEnergy);
+            if (gain <= 1.05) return;   // 本来就没损失，不折腾
+
+            for (int y = 0; y < scaled.Height; y++)
+            {
+                byte* row = p + y * dd.Stride;
+                for (int x = 0; x < scaled.Width; x++)
+                {
+                    int a = row[x * 4 + 3];
+                    if (a == 0) continue;             // 全透明像素保持透明
+                    int na = (int)Math.Round(a * gain);
+                    if (na > 255) na = 255;
+                    row[x * 4 + 3] = (byte)na;
+                }
+            }
+        }
+        finally { scaled.UnlockBits(dd); }
+    }
+
+    private static Bitmap ToBitmap(Image img)
+    {
+        if (img is Bitmap bmp && bmp.PixelFormat == PixelFormat.Format32bppArgb) return bmp;
+        var copy = new Bitmap(img.Width, img.Height, PixelFormat.Format32bppArgb);
+        using var g = Graphics.FromImage(copy);
+        g.DrawImage(img, 0, 0, img.Width, img.Height);
+        return copy;
     }
 
     /// <summary>
@@ -430,6 +631,17 @@ public sealed class CrosshairForm : Form
     {
         if (disposing)
         {
+            try
+            {
+                if (_watchdog != null)
+                {
+                    _watchdog.Stop();
+                    _watchdog.Dispose();
+                    _watchdog = null;
+                }
+            }
+            catch { }
+
             _image?.Dispose();
             _image = null;
         }

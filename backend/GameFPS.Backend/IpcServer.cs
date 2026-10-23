@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.IO;
 using System.Net;
 using System.Net.WebSockets;
 using System.Text;
@@ -14,6 +15,9 @@ namespace GameFPS.Backend;
 /// </summary>
 public sealed class IpcServer : IDisposable
 {
+    /// <summary>单条消息上限。准星图片按 base64 传输，要给大图留足空间。</summary>
+    private const int MaxMessageBytes = 16 * 1024 * 1024;
+
     private readonly ConcurrentDictionary<string, WebSocket> _clients = new();
     private HttpListener? _listener;
     private CancellationTokenSource? _cts;
@@ -89,15 +93,37 @@ public sealed class IpcServer : IDisposable
         string id = Guid.NewGuid().ToString("N");
         _clients[id] = socket;
 
+        // 单帧 16 KB 只能装下小消息；准星图片走 base64 data URL，SSCJ 这类
+        // 220x220 的预设图 base64 后约 31 KB，会被劈成多帧。必须按 EndOfMessage
+        // 拼接，否则只解析到前半段 JSON —— 表现就是"选这张图没反应"。
         var buffer = new byte[16384];
+        var message = new MemoryStream();
         try
         {
             while (socket.State == WebSocketState.Open && !ct.IsCancellationRequested)
             {
                 var result = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), ct);
                 if (result.MessageType == WebSocketMessageType.Close) break;
-                if (result.MessageType == WebSocketMessageType.Text && result.Count > 0)
-                    MessageReceived?.Invoke(Encoding.UTF8.GetString(buffer, 0, result.Count));
+
+                if (result.MessageType != WebSocketMessageType.Text) continue;
+
+                message.Write(buffer, 0, result.Count);
+
+                if (message.Length > MaxMessageBytes)
+                {
+                    // 超限消息直接丢弃并断开，避免恶意的无限长帧吃满内存
+                    message.SetLength(0);
+                    break;
+                }
+
+                if (!result.EndOfMessage) continue;   // 还有后续分片，继续收
+
+                if (message.Length > 0)
+                {
+                    string json = Encoding.UTF8.GetString(message.GetBuffer(), 0, (int)message.Length);
+                    MessageReceived?.Invoke(json);
+                }
+                message.SetLength(0);
             }
         }
         catch { /* 客户端断开 */ }
