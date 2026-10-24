@@ -546,6 +546,26 @@
       <p class="muted small">改完点下面的「保存设置」生效。</p>
     </div>
 
+    <div class="card">
+      <h3>启动与关闭</h3>
+      <label class="row toggle">
+        <input type="checkbox" id="s-minimizeOnClose" checked>
+        <span>点关闭按钮时最小化到托盘</span>
+      </label>
+      <p class="muted small" style="margin:-4px 0 8px">
+        勾上：关掉界面只是收进托盘，采集和悬浮窗继续在后台跑，点托盘图标可以再打开。
+        不勾：关掉界面就退出整个程序（等同于托盘菜单的「退出」）。
+      </p>
+      <label class="row toggle">
+        <input type="checkbox" id="s-autoStart">
+        <span>开机自启</span>
+      </label>
+      <p class="muted small" style="margin:-4px 0 0">
+        写当前用户的注册表启动项（<code>HKCU\Software\Microsoft\Windows\CurrentVersion\Run</code>），
+        不需要额外权限，也不会弹 UAC。托盘右键菜单里也有同一个开关，两边状态同步。
+      </p>
+    </div>
+
     <div class="actions">
       <span class="muted small">所有改动即时生效，无需保存</span>
       <button id="btn-reset" class="ghost">恢复默认</button>

@@ -127,6 +127,20 @@ public sealed class OverlaySettings
     /// <summary>打开主界面的热键。</summary>
     public string HotkeyOpenMain { get; set; } = "Shift+F9";
 
+    // ---- 启动与关闭行为 ----
+    /// <summary>
+    /// 点主界面窗口的关闭按钮时的行为：false = 直接退出整个程序，
+    /// true = 只把窗口收进托盘，采集和悬浮窗继续在后台跑。
+    /// 无论这里怎么设，托盘菜单的「退出」永远是真退出。
+    /// </summary>
+    public bool MinimizeOnClose { get; set; } = true;
+
+    /// <summary>
+    /// 开机自启（写 HKCU\Software\Microsoft\Windows\CurrentVersion\Run）。
+    /// 只操作当前用户的注册表项，不碰计划任务，也不需要管理员权限。
+    /// </summary>
+    public bool AutoStart { get; set; } = false;
+
     // ---- 屏幕准星 ----
     /// <summary>
     /// 屏幕准星参数。以子对象形式保存，前端 setSettings 时随设置一起往返，

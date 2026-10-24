@@ -10,6 +10,24 @@ let latest = null;
 let settings = null;
 
 /** 用户是否正在设置页的某个输入控件上操作（热更新时用来抑制回填）。 */
+/** 同步由后端拍板的布尔开关（开机自启 / 关闭行为）。 */
+function syncAuthoritativeSwitches(s) {
+  if (!s) return;
+  const auto = $('s-autoStart');
+  if (auto && auto.checked !== !!s.autoStart) auto.checked = !!s.autoStart;
+
+  const close = $('s-minimizeOnClose');
+  if (close) {
+    const want = s.minimizeOnClose !== false;
+    if (close.checked !== want) close.checked = want;
+  }
+
+  // 顺带给主进程也同步一次：托盘菜单改过关闭行为时，这里能兜住
+  if (window.gamefps && window.gamefps.setClosePolicy) {
+    window.gamefps.setClosePolicy(s.minimizeOnClose === false ? 'quit' : 'minimize');
+  }
+}
+
 function isEditingForm() {
   const el = document.activeElement;
   // cx- 是准星页的控件；同样不能在拖动时被打断
@@ -72,6 +90,10 @@ function dispatch(msg) {
       // 热更新模式下后端会把自己的改动广播回来；此时若用户正在某个输入框里打字，
       // 回填会打断输入（光标跳走、滑块回弹），所以有焦点时不回填。
       if (!isEditingForm()) fillSettings(settings);
+      // 这两个是"后端说了算"的开关：开机自启可能因注册表写入失败被后端弹回，
+      // 关闭行为也可能被托盘改过。它们都不是输入框，回填不会打断打字，
+      // 所以即便正在编辑其它字段也要同步，否则界面会显示成用户以为的状态。
+      syncAuthoritativeSwitches(settings);
       break;
     case 'displays':
       renderDisplays(msg.data);
@@ -1649,6 +1671,8 @@ const FIELDS = [
   ['overlayEnabled', 'checkbox'],
   ['usePresetStyle', 'checkbox'],
   ['overlayStyle', 'number'],
+  ['minimizeOnClose', 'checkbox'],
+  ['autoStart', 'checkbox'],
   ['autoShowOnGame', 'checkbox'],
   ['showGameName', 'checkbox'],
   ['showFps', 'checkbox'],
@@ -2540,6 +2564,22 @@ function init() {
   if (hash) {
     const target = document.querySelector(`.tab[data-page="${hash}"]`);
     if (target) target.click();
+  }
+
+  // 主进程在「关闭窗口 = 退出程序」策略下会发 request-quit，
+  // 由前端经 WebSocket 通知 C# 后端一起退出 —— 后端才是常驻进程，
+  // 它退了会把 Electron 整棵进程树收掉。WS 断着就直接让主进程退出。
+  if (window.gamefps && window.gamefps.onQuitRequested) {
+    window.gamefps.onQuitRequested(() => {
+      const connected = ws && ws.readyState === WebSocket.OPEN;
+      if (connected) {
+        send({ type: 'quit' });
+        // 后端收到 quit 会走正常退出流程并收掉 Electron；这里不再重复退出，
+        // 万一它没响应，主进程自己的 2 秒兜底会接管。
+      } else if (window.gamefps.forceQuit) {
+        window.gamefps.forceQuit();
+      }
+    });
   }
 
   connect();

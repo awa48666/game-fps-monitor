@@ -18,6 +18,32 @@ contextBridge.exposeInMainWorld('gamefps', {
   focusWindow: () => ipcRenderer.send('focus-window'),
 
   /**
+   * 告诉主进程「点关闭按钮时该怎么做」。
+   * mode: 'minimize' = 收进托盘，'quit' = 退出整个程序。
+   * 渲染进程每次收到设置就调一次，所以改了设置立刻生效，不用重启。
+   */
+  setClosePolicy: (mode) => ipcRenderer.send('set-close-policy', mode),
+
+  /**
+   * 主进程要退出时先问渲染进程一声：由渲染进程经 WebSocket 通知 C# 后端
+   * 一起退出（后端才是常驻进程，它退了会把 Electron 整棵进程树收掉）。
+   * 这样「关闭窗口 = 退出程序」才是真退出，而不是只关掉界面留下托盘。
+   */
+  onQuitRequested: (cb) => {
+    if (typeof cb !== 'function') return;
+    ipcRenderer.on('request-quit', () => cb());
+  },
+
+  /** WS 已断开时的兜底：直接让主进程退出，别把窗口卡在那儿不关。 */
+  forceQuit: () => ipcRenderer.send('force-quit'),
+
+  /** 主进程隐藏窗口后，前端再点托盘图标时会被这条消息唤起。 */
+  onShown: (cb) => {
+    if (typeof cb !== 'function') return;
+    ipcRenderer.on('window-shown', () => cb());
+  },
+
+  /**
    * 把 app/src 下的资源读成 dataURL。
    * 页面是 file:// 加载的，渲染进程里 fetch('file://...') 会被 Chromium 直接拒掉，
    * 而图片准星又必须拿到真实字节交给后端，所以这里用 preload 的 Node 能力读盘。
