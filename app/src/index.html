@@ -23,6 +23,7 @@
 <nav class="tabs">
   <button class="tab active" data-page="monitor">实时监控</button>
   <button class="tab" data-page="history">历史记录</button>
+  <button class="tab" data-page="crosshair">准星</button>
   <button class="tab" data-page="settings">设置</button>
 </nav>
 
@@ -158,6 +159,196 @@
         <div class="muted small" id="detail-chart-note"></div>
       </div>
       <div id="detail-body" class="detail-grid"></div>
+    </div>
+
+  </section>
+
+  <!-- ================= 准星 ================= -->
+  <section id="page-crosshair" class="page">
+
+    <div class="card">
+      <div class="card-head">
+        <h3>屏幕准星</h3>
+        <div class="card-head-actions">
+          <label class="toggle">
+            <input type="checkbox" id="cx-enabled">
+            <span>启用准星</span>
+          </label>
+        </div>
+      </div>
+      <p class="muted small">
+        准星是一块独立的分层小窗，画在选中显示器的正中央。它永远点击穿透、不抢焦点，
+        所以游戏里既不会挡住鼠标，也不会影响帧数。下面的改动都即时生效。
+      </p>
+
+      <div class="cx-layout">
+        <div class="cx-preview-wrap">
+          <canvas id="cx-preview"></canvas>
+          <div class="cx-preview-caption muted small">实时预览（棋盘格 = 透明区域）</div>
+        </div>
+
+        <div class="cx-controls">
+          <h4>样式</h4>
+          <div class="cx-styles" id="cx-styles"></div>
+
+          <h4>尺寸</h4>
+          <label class="row">
+            <span>大小</span>
+            <input type="range" id="cx-size" min="2" max="60" step="1" value="20">
+            <b id="cx-size-val" class="mono"></b>
+          </label>
+          <label class="row">
+            <span>线条粗细</span>
+            <input type="range" id="cx-thickness" min="1" max="10" step="1" value="2">
+            <b id="cx-thickness-val" class="mono"></b>
+          </label>
+          <label class="row">
+            <span>中心留空</span>
+            <input type="range" id="cx-gap" min="0" max="30" step="1" value="0">
+            <b id="cx-gap-val" class="mono"></b>
+          </label>
+          <label class="row">
+            <span>中心点大小</span>
+            <input type="range" id="cx-dot" min="0" max="12" step="1" value="2">
+            <b id="cx-dot-val" class="mono"></b>
+          </label>
+          <label class="row">
+            <span>不透明度</span>
+            <input type="range" id="cx-opacity" min="0" max="255" step="5" value="255">
+            <b id="cx-opacity-val" class="mono"></b>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>渲染方式</h3>
+      <div class="cx-segment" id="cx-render-mode">
+        <button type="button" class="cx-seg active" data-mode="procedural">程序绘制</button>
+        <button type="button" class="cx-seg" data-mode="image">图片绘制</button>
+      </div>
+
+      <div id="cx-image-panel" hidden>
+        <h4>内置预设（点一下就换）</h4>
+        <div class="cx-preset-images" id="cx-preset-images"></div>
+        <h4>自己的图片</h4>
+
+        <div class="row">
+          <span>图片尺寸</span>
+          <input type="range" id="cx-image-size" min="8" max="200" step="1" value="64">
+          <b id="cx-image-size-val" class="mono"></b>
+        </div>
+        <div class="row">
+          <button type="button" id="btn-cx-pick-image" class="mini">选择本地图片…</button>
+          <input type="file" id="cx-image-file" accept="image/*" hidden>
+          <span id="cx-image-name" class="muted small">未选择图片</span>
+        </div>
+        <p class="muted small">
+          支持 PNG / JPG / GIF / BMP。非正方形的图片会被拉伸成正方形；
+          <b>透明度滑块对图片同样生效</b>。图片会复制到本机 <code>%LOCALAPPDATA%\GameFPSMonitor\crosshair\</code>，
+          所以关掉界面也在。
+        </p>
+      </div>
+
+      <p class="muted small" id="cx-procedural-note">
+        程序绘制：用下面的样式 + 尺寸 + 颜色实时画出来，任何分辨率都清晰。
+      </p>
+    </div>
+
+    <div class="card">
+      <h3>颜色</h3>
+      <div class="row">
+        <span>准星颜色</span>
+        <div class="cx-colors" id="cx-colors"></div>
+        <input type="color" id="cx-color" value="#ff0000">
+      </div>
+
+      <h4>轮廓</h4>
+      <label class="row toggle">
+        <input type="checkbox" id="cx-outline-enabled">
+        <span>给准星加描边（在浅色场景里更醒目）</span>
+      </label>
+      <div class="row">
+        <span>描边颜色</span>
+        <input type="color" id="cx-outline-color" value="#000000">
+        <span>描边粗细</span>
+        <input type="range" id="cx-outline-thickness" min="1" max="5" step="1" value="1">
+        <b id="cx-outline-thickness-val" class="mono"></b>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>位置与热键</h3>
+      <label class="row">
+        <span>显示器</span>
+        <select id="cx-monitor" class="text">
+          <option value="-1">主显示器（跟随系统）</option>
+        </select>
+        <button id="btn-refresh-displays" class="mini">刷新</button>
+      </label>
+      <label class="row">
+        <span>水平偏移</span>
+        <input type="number" id="cx-offset-x" class="num" step="1" value="0">
+        <span class="muted small">像素，正数向右；某些游戏的准星略偏，可在这里微调</span>
+      </label>
+      <label class="row">
+        <span>垂直偏移</span>
+        <input type="number" id="cx-offset-y" class="num" step="1" value="0">
+        <span class="muted small">正数向下</span>
+      </label>
+      <label class="row">
+        <span>显示/隐藏热键</span>
+        <input type="text" id="cx-hotkey" class="text mono hotkey-input"
+               value="F8" placeholder="点击后按下组合键" readonly>
+      </label>
+      <p class="muted small">
+        点输入框后直接按组合键录入，<code>Esc</code> 取消。默认 <code>F8</code> ——
+        <code>F9</code> 与 <code>Shift+F9</code> 已经给了悬浮窗和主界面。
+      </p>
+
+      <h4>按住显示</h4>
+      <label class="row toggle">
+        <input type="checkbox" id="cx-hold-enabled">
+        <span>只在按住下面这个键时显示准星（松开立刻隐藏）</span>
+      </label>
+      <label class="row">
+        <span>按住键</span>
+        <input type="text" id="cx-hold-key" class="text mono hotkey-input"
+               value="Mouse2" placeholder="按键盘键或点鼠标键" readonly>
+        <span>延迟</span>
+        <input type="number" id="cx-hold-delay" class="num" min="0" max="10000" step="10" value="0">
+        <span class="muted small">毫秒，0 = 一按下就显示</span>
+      </label>
+      <p class="muted small">
+        按住 <code>Esc</code> 可取消录入。支持鼠标左/右/中/侧键（<code>Mouse1</code>–<code>Mouse5</code>）
+        与键盘键。适合"只在开镜/架枪时看准星"的打法。
+      </p>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>我的预设</h3>
+        <div class="card-head-actions">
+          <button type="button" id="btn-cx-save-preset" class="mini">保存当前设置为准星预设</button>
+          <button type="button" id="btn-cx-reset-default" class="mini">恢复默认</button>
+        </div>
+      </div>
+      <div class="cx-presets" id="cx-presets"></div>
+      <p class="muted small" id="cx-presets-empty">
+        还没有预设。把准星调成喜欢的样子，点上面的「保存当前设置为准星预设」，
+        之后一键切换；每个预设都会存下样式、尺寸、颜色、描边、图片与按住设置。
+      </p>
+    </div>
+
+    <div class="cx-dialog" id="cx-preset-dialog" hidden>
+      <div class="cx-dialog-box">
+        <h4>保存准星预设</h4>
+        <input type="text" id="cx-preset-name" class="text" maxlength="30" placeholder="给这个预设起个名字">
+        <div class="cx-dialog-actions">
+          <button type="button" id="btn-cx-preset-cancel" class="mini">取消</button>
+          <button type="button" id="btn-cx-preset-ok" class="mini primary">保存</button>
+        </div>
+      </div>
     </div>
 
   </section>

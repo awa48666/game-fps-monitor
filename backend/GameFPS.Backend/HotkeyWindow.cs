@@ -12,6 +12,7 @@ public sealed class HotkeyWindow : Form
     private const int WM_HOTKEY = 0x0312;
     private const int IdToggleOverlay = 0x5101;
     private const int IdOpenMain = 0x5102;
+    private const int IdToggleCrosshair = 0x5103;
 
     private const uint MOD_ALT = 0x0001;
     private const uint MOD_CONTROL = 0x0002;
@@ -27,12 +28,14 @@ public sealed class HotkeyWindow : Form
 
     public event Action? ToggleOverlay;
     public event Action? OpenMain;
+    public event Action? ToggleCrosshair;
 
     /// <summary>热键注册失败时触发：(热键文本, 原因)。</summary>
     public event Action<string, string>? HotkeyFailed;
 
     private bool _toggleRegistered;
     private bool _openRegistered;
+    private bool _crosshairRegistered;
 
     public HotkeyWindow(OverlaySettings settings)
     {
@@ -78,6 +81,14 @@ public sealed class HotkeyWindow : Form
         int openErr = _openRegistered ? 0 : Marshal.GetLastWin32Error();
         Log($"openmain '{settings.HotkeyOpenMain}' -> mods=0x{mods:X} vk=0x{vk:X} ok={_openRegistered} err={openErr}");
         if (vk != 0 && !_openRegistered) Fail(settings.HotkeyOpenMain, openErr);
+
+        // 准星热键。老配置文件里可能没有 crosshair 子树，这里按空串处理（不注册）。
+        string crosshair = settings.Crosshair?.HotkeyToggle ?? "";
+        (mods, vk) = Parse(crosshair);
+        if (vk != 0) _crosshairRegistered = RegisterHotKey(Handle, IdToggleCrosshair, mods | MOD_NOREPEAT, vk);
+        int crosshairErr = _crosshairRegistered ? 0 : Marshal.GetLastWin32Error();
+        Log($"crosshair '{crosshair}' -> mods=0x{mods:X} vk=0x{vk:X} ok={_crosshairRegistered} err={crosshairErr}");
+        if (vk != 0 && !_crosshairRegistered) Fail(crosshair, crosshairErr);
     }
 
     /// <summary>注册失败（多半是被别的程序占了）时通知上层，界面好给提示。</summary>
@@ -110,6 +121,11 @@ public sealed class HotkeyWindow : Form
             try { UnregisterHotKey(Handle, IdOpenMain); } catch { }
             _openRegistered = false;
         }
+        if (_crosshairRegistered)
+        {
+            try { UnregisterHotKey(Handle, IdToggleCrosshair); } catch { }
+            _crosshairRegistered = false;
+        }
     }
 
     protected override void WndProc(ref Message m)
@@ -120,6 +136,7 @@ public sealed class HotkeyWindow : Form
             {
                 case IdToggleOverlay: ToggleOverlay?.Invoke(); break;
                 case IdOpenMain: OpenMain?.Invoke(); break;
+                case IdToggleCrosshair: ToggleCrosshair?.Invoke(); break;
             }
         }
         base.WndProc(ref m);

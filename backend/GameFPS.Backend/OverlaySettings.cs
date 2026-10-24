@@ -116,6 +116,13 @@ public sealed class OverlaySettings
     /// <summary>打开主界面的热键。</summary>
     public string HotkeyOpenMain { get; set; } = "Shift+F9";
 
+    // ---- 屏幕准星 ----
+    /// <summary>
+    /// 屏幕准星参数。以子对象形式保存，前端 setSettings 时随设置一起往返，
+    /// 不需要为它单独开一条持久化通道。
+    /// </summary>
+    public CrosshairSettings Crosshair { get; set; } = new();
+
     // ---- 监测目标 ----
     /// <summary>手动指定要监测的进程，关闭"自动检测前台渲染进程"。</summary>
     public bool ManualTargetEnabled { get; set; } = false;

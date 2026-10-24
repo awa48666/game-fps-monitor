@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Text;
 using System.Text.Json;
 using System.Windows.Forms;
 using GameFPS.Core;
@@ -23,6 +24,8 @@ public sealed class AppHost : IDisposable
     private readonly MonitorEngine _engine = new();
     private OverlaySettings _settings = new();
     private OverlayForm? _overlay;
+    private CrosshairForm? _crosshair;
+    private CrosshairHold? _hold;
     private IpcServer? _ipc;
     private TrayHost? _tray;
     private HotkeyWindow? _hotkeys;
@@ -70,6 +73,15 @@ public sealed class AppHost : IDisposable
             StartError = $"创建游戏内悬浮窗失败：{ex.GetType().Name} {ex.Message}";
             return false;
         }
+
+        try
+        {
+            // 准星单独兜底：它挂了不该拖垮帧率监测这个主功能
+            _crosshair = new CrosshairForm(_settings.Crosshair);
+            _hold = new CrosshairHold(_crosshair);
+            _hold.Apply(_settings.Crosshair);
+        }
+        catch { _crosshair = null; _hold = null; }
 
         try
         {
@@ -126,6 +138,7 @@ public sealed class AppHost : IDisposable
             _hotkeys = new HotkeyWindow(_settings);
             _hotkeys.ToggleOverlay += ToggleOverlay;
             _hotkeys.OpenMain += OpenMainUi;
+            _hotkeys.ToggleCrosshair += ToggleCrosshair;
             _hotkeys.HotkeyFailed += (hk, reason) =>
                 _ipc?.Broadcast(JsonSerializer.Serialize(
                     new { type = "hotkeyFailed", data = new { hotkey = hk, reason } }, JsonOpts));
@@ -174,6 +187,59 @@ public sealed class AppHost : IDisposable
         => _ipc?.Broadcast(JsonSerializer.Serialize(
                new { type = "candidates", data = _engine.GetCandidates() }, JsonOpts));
 
+    /// <summary>
+    /// 已导入的自选图片列表。NexBox 的做法是：选完自己的图片，它就变成预设网格里的
+    /// 一格，和内置预设并排，下次直接点。这里照做 —— 前端点「选择本地图片」时把图
+    /// 交给后端落盘，落盘后再把整个目录列回去，前端重新渲染网格。
+    /// </summary>
+    private void SendCrosshairImages()
+    {
+        var list = new List<object>();
+        try
+        {
+            string dir = AppPaths.CrosshairImageDir;
+            if (Directory.Exists(dir))
+            {
+                foreach (string path in Directory.GetFiles(dir))
+                {
+                    string ext = Path.GetExtension(path).ToLowerInvariant();
+                    if (ext != ".png" && ext != ".jpg" && ext != ".jpeg"
+                        && ext != ".gif" && ext != ".bmp") continue;
+
+                    list.Add(new
+                    {
+                        name = Path.GetFileName(path),
+                        path,
+                    });
+                }
+            }
+        }
+        catch { /* 目录读不了就当没有自选图 */ }
+
+        _ipc?.Broadcast(JsonSerializer.Serialize(
+            new { type = "crosshairImages", data = list }, JsonOpts));
+    }
+
+    /// <summary>显示器列表，供准星页选择把准星放在哪块屏上。</summary>
+    private void SendDisplays()
+    {
+        var screens = Screen.AllScreens;
+        var list = new List<object>(screens.Length);
+        for (int i = 0; i < screens.Length; i++)
+        {
+            var sc = screens[i];
+            list.Add(new
+            {
+                index = i,
+                name = $"显示器 {i + 1}",
+                primary = sc.Primary,
+                width = sc.Bounds.Width,
+                height = sc.Bounds.Height,
+            });
+        }
+        _ipc?.Broadcast(JsonSerializer.Serialize(new { type = "displays", data = list }, JsonOpts));
+    }
+
     /// <summary>一场游戏结束且记录已落盘：托盘提示并通知界面刷新历史。</summary>
     private void OnSessionCompleted(SessionRecord record)
     {
@@ -220,8 +286,18 @@ public sealed class AppHost : IDisposable
                     SendSettings();
                     SendSessions();
                     SendCandidates();
+                    SendDisplays();
+                    SendCrosshairImages();
                     if (_last != null)
                         _ipc?.Broadcast(JsonSerializer.Serialize(new { type = "snapshot", data = _last }, JsonOpts));
+                    break;
+
+                case "getDisplays":
+                    SendDisplays();
+                    break;
+
+                case "getCrosshairImages":
+                    SendCrosshairImages();
                     break;
 
                 case "getCandidates":
@@ -338,6 +414,33 @@ public sealed class AppHost : IDisposable
                     ToggleOverlay();
                     break;
 
+                case "toggleCrosshair":
+                    ToggleCrosshair();
+                    break;
+
+                case "setCrosshairImage":
+                    // data: { name, dataUrl } —— 前端把预设图/自选图以 base64 dataURL 送进来
+                    if (doc.RootElement.TryGetProperty("data", out var imgEl))
+                    {
+                        string? imgName = imgEl.TryGetProperty("name", out var nEl) ? nEl.GetString() : null;
+                        string? dataUrl = imgEl.TryGetProperty("dataUrl", out var dEl) ? dEl.GetString() : null;
+                        SaveCrosshairImage(imgName, dataUrl);
+                    }
+                    break;
+
+                case "setCrosshairEnabled":
+                    // data: { value: true } —— 只要开关位，参数沿用当前设置
+                    if (doc.RootElement.TryGetProperty("value", out var cxEl))
+                    {
+                        _settings.Crosshair ??= new CrosshairSettings();
+                        _settings.Crosshair.Enabled = cxEl.ValueKind == JsonValueKind.True;
+                        _settings.Save();
+                        _crosshair?.Apply(_settings.Crosshair);
+                        _hold?.Apply(_settings.Crosshair);
+                        SendSettings();
+                    }
+                    break;
+
                 case "setOverlayDragMode":
                     // data: { enabled: true } 进入拖动定位模式，false 退出
                     if (doc.RootElement.TryGetProperty("enabled", out var dragEl))
@@ -365,8 +468,11 @@ public sealed class AppHost : IDisposable
     private void ApplySettings(OverlaySettings settings)
     {
         _settings = settings;
+        _settings.Crosshair ??= new CrosshairSettings();   // 老配置或前端漏传时补齐
         _settings.Save();
         _overlay?.UpdateSettings(_settings);
+        _crosshair?.Apply(_settings.Crosshair);
+        _hold?.Apply(_settings.Crosshair);
         _hotkeys?.Apply(_settings);
         _tray?.SetOverlayChecked(_settings.OverlayEnabled);
         ApplyPriority();
@@ -411,6 +517,69 @@ public sealed class AppHost : IDisposable
         if (!_settings.OverlayEnabled) _overlay?.HideOverlay();
         else if (_last != null) _overlay?.ApplySnapshot(_last);
 
+        SendSettings();
+    }
+
+    /// <summary>
+    /// 保存前端送来的准星图片（内置预设图或用户自选图），落盘后写进设置并立即生效。
+    /// 目录：%LOCALAPPDATA%\GameFPSMonitor\crosshair\ —— 图片必须落在本地磁盘上，
+    /// 这样关掉界面、甚至把前端进程杀了，准星照样能画出来。
+    /// </summary>
+    private void SaveCrosshairImage(string? name, string? dataUrl)
+    {
+        if (string.IsNullOrWhiteSpace(dataUrl)) return;
+
+        try
+        {
+            int comma = dataUrl.IndexOf(',');
+            string b64 = comma >= 0 ? dataUrl[(comma + 1)..] : dataUrl;
+            byte[] bytes = Convert.FromBase64String(b64);
+            if (bytes.Length == 0) return;
+
+            // 与 settings.json / records 同一个数据根，避免两处目录分家
+            string dir = AppPaths.CrosshairImageDir;
+            Directory.CreateDirectory(dir);
+
+            string path = Path.Combine(dir, SafeFileName(name));
+            File.WriteAllBytes(path, bytes);
+
+            _settings.Crosshair ??= new CrosshairSettings();
+            _settings.Crosshair.UseCustomImage = true;
+            _settings.Crosshair.CustomImagePath = path;
+            _settings.Crosshair.Enabled = true;
+            _settings.Save();
+
+            _crosshair?.Apply(_settings.Crosshair);
+            _hold?.Apply(_settings.Crosshair);
+            SendSettings();
+            SendCrosshairImages();
+        }
+        catch
+        {
+            // 图片解不开就当没收到，前端还能重新选一次
+        }
+    }
+
+    /// <summary>只取文件名部分并替换非法字符，防止前端传来带路径的名字跳出目录。</summary>
+    private static string SafeFileName(string? name)
+    {
+        string raw = Path.GetFileName(string.IsNullOrWhiteSpace(name) ? "crosshair.png" : name);
+        var sb = new StringBuilder(raw.Length);
+        foreach (char c in raw)
+            sb.Append(Array.IndexOf(Path.GetInvalidFileNameChars(), c) >= 0 ? '_' : c);
+
+        string cleaned = sb.ToString().Trim();
+        return cleaned.Length == 0 ? "crosshair.png" : cleaned;
+    }
+
+    /// <summary>切换准星显示。被全局热键、IPC 与界面开关共用。</summary>
+    private void ToggleCrosshair()
+    {
+        _settings.Crosshair ??= new CrosshairSettings();
+        _settings.Crosshair.Enabled = !_settings.Crosshair.Enabled;
+        _settings.Save();
+        _crosshair?.Apply(_settings.Crosshair);
+        _hold?.Apply(_settings.Crosshair);
         SendSettings();
     }
 
@@ -509,6 +678,8 @@ public sealed class AppHost : IDisposable
         try { _tray?.Dispose(); } catch { }
         try { _ipc?.Dispose(); } catch { }
         try { _overlay?.Dispose(); } catch { }
+        try { _hold?.Dispose(); } catch { }
+        try { _crosshair?.Dispose(); } catch { }
 
         try
         {

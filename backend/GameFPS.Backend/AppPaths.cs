@@ -23,6 +23,13 @@ public static class AppPaths
     public static string RecordsDir => Path.Combine(DataDir, "records");
 
     /// <summary>
+    /// 准星图片目录。和设置、记录放在同一个数据根下，
+    /// 否则 v1.0.8 那版把图写到了 %LOCALAPPDATA%\GameFPS\crosshair，
+    /// 与设置目录（GameFPSMonitor）分家，用户换机或清理时容易只删掉一半。
+    /// </summary>
+    public static string CrosshairImageDir => Path.Combine(DataDir, "crosshair");
+
+    /// <summary>
     /// 把旧版本留在程序目录里的 settings.json 和 records\ 搬到新位置。
     /// 只在新位置还没有对应内容时才搬，避免覆盖用户已有数据。
     /// 搬家失败不影响启动（顶多是数据留在老地方）。

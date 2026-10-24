@@ -615,3 +615,266 @@ code {
   color: var(--muted);
   margin-left: 6px;
 }
+
+/* ===================== 屏幕准星页 ===================== */
+
+.cx-layout {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 18px;
+  align-items: start;
+  margin-top: 12px;
+}
+
+.cx-preview-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+}
+
+/* 棋盘格底：让透明区域看得见，预览才不会被误当成纯色背景 */
+#cx-preview {
+  width: 260px;
+  height: 260px;
+  display: block;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background-color: var(--input-bg);
+  background-image:
+    linear-gradient(45deg, rgba(255, 255, 255, .05) 25%, transparent 25%, transparent 75%, rgba(255, 255, 255, .05) 75%),
+    linear-gradient(45deg, rgba(255, 255, 255, .05) 25%, transparent 25%, transparent 75%, rgba(255, 255, 255, .05) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+}
+
+.cx-preview-caption { text-align: center; }
+
+.cx-controls { min-width: 0; }
+.cx-controls h4:first-child { margin-top: 0; }
+
+.cx-styles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.cx-style {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--input-bg);
+  color: var(--muted);
+  cursor: pointer;
+  transition: border-color .12s, color .12s, background .12s;
+}
+
+.cx-style i {
+  font-style: normal;
+  font-size: 19px;
+  line-height: 1.1;
+}
+
+.cx-style span { font-size: 11px; }
+
+.cx-style:hover { border-color: var(--line-strong); color: var(--text); }
+
+.cx-style.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--active-bg);
+}
+
+.cx-colors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 1;
+}
+
+.cx-swatch {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, .35) inset;
+}
+
+.cx-swatch.active { border-color: var(--text); }
+
+/* ---------- 准星：渲染方式 / 图片 / 预设 ---------- */
+
+.cx-segment {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  margin: 4px 0 10px;
+  border: 1px solid #2a2f38;
+  border-radius: 8px;
+  background: #14171d;
+}
+
+.cx-seg {
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #9aa4b2;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.cx-seg:hover { color: #d6dde8; background: #1d222b; }
+
+.cx-seg.active {
+  background: #2b6cff;
+  color: #fff;
+}
+
+.cx-image-panel[hidden],
+#cx-procedural-note[hidden],
+.cx-styles[hidden] { display: none !important; }
+
+.cx-preset-images {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+
+.cx-preset-img {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px 6px;
+  border: 1px solid #2a2f38;
+  border-radius: 8px;
+  background: #14171d;
+  cursor: pointer;
+}
+
+.cx-preset-img img {
+  width: 52px;
+  height: 52px;
+  object-fit: contain;
+  image-rendering: pixelated;
+}
+
+.cx-preset-img span {
+  font-size: 11px;
+  color: #9aa4b2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.cx-preset-img:hover { border-color: #3a4250; background: #1a1f27; }
+
+.cx-preset-img.active {
+  border-color: #2b6cff;
+  background: #16213a;
+}
+
+.cx-preset-img.active span { color: #cfe0ff; }
+
+/* 自选图那一格：右上角加个小角标，和内置预设区分开 */
+.cx-preset-img.own { position: relative; }
+
+.cx-preset-img.own::after {
+  content: '自';
+  position: absolute;
+  top: 3px;
+  right: 4px;
+  font-size: 9px;
+  line-height: 1;
+  padding: 2px 3px;
+  border-radius: 3px;
+  color: #9fe0b0;
+  background: rgba(30, 90, 55, 0.85);
+}
+
+.cx-presets {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.cx-preset-card {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid #2a2f38;
+  border-radius: 8px;
+  background: #14171d;
+}
+
+.cx-preset-card b { font-size: 13px; color: #d6dde8; }
+
+.cx-preset-actions { display: flex; gap: 6px; }
+
+.mini.danger {
+  color: #ff8a8a;
+  border-color: #5a2b2b;
+}
+
+.mini.danger:hover { background: #3a1e1e; }
+
+/* 准星预设命名对话框（Electron 禁用了 window.prompt，只能自绘） */
+
+.cx-dialog {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.cx-dialog[hidden] { display: none !important; }
+
+.cx-dialog-box {
+  width: 320px;
+  padding: 16px 18px 14px;
+  border: 1px solid #2a2f38;
+  border-radius: 10px;
+  background: #171b22;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.6);
+}
+
+.cx-dialog-box h4 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  color: #e6ebf3;
+}
+
+.cx-dialog-box input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.cx-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.mini.primary {
+  background: #2b6cff;
+  border-color: #2b6cff;
+  color: #fff;
+}
+
+.mini.primary:hover { background: #3a79ff; }

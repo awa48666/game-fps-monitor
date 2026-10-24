@@ -12,7 +12,8 @@ let settings = null;
 /** 用户是否正在设置页的某个输入控件上操作（热更新时用来抑制回填）。 */
 function isEditingForm() {
   const el = document.activeElement;
-  if (!el || !el.id || !el.id.startsWith('s-')) return false;
+  // cx- 是准星页的控件；同样不能在拖动时被打断
+  if (!el || !el.id || !(el.id.startsWith('s-') || el.id.startsWith('cx-'))) return false;
   const tag = el.tagName;
   return tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA';
 }
@@ -71,6 +72,12 @@ function dispatch(msg) {
       // 热更新模式下后端会把自己的改动广播回来；此时若用户正在某个输入框里打字，
       // 回填会打断输入（光标跳走、滑块回弹），所以有焦点时不回填。
       if (!isEditingForm()) fillSettings(settings);
+      break;
+    case 'displays':
+      renderDisplays(msg.data);
+      break;
+    case 'crosshairImages':
+      renderCxUserImages(Array.isArray(msg.data) ? msg.data : []);
       break;
     case 'sessions':
       renderHistory(Array.isArray(msg.data) ? msg.data : []);
@@ -751,6 +758,891 @@ function drawFrameTimeChart(frameTimes) {
   }
 }
 
+/* ===================== 屏幕准星 ===================== */
+
+/** 与 C# CrosshairForm 的绘制分支一一对应。 */
+const CX_STYLES = [
+  { id: 'Cross',       icon: '+',  name: '十字' },
+  { id: 'Dot',         icon: '●',  name: '圆点' },
+  { id: 'Circle',      icon: '○',  name: '圆环' },
+  { id: 'CrossDot',    icon: '✚',  name: '十字+点' },
+  { id: 'CircleCross', icon: '⊕',  name: '圆环+十字' },
+  { id: 'DotBox',      icon: '▣',  name: '方框+点' },
+];
+
+const CX_COLOR_PRESETS = [
+  '#ff0000', '#00ff00', '#0000ff', '#00ffff', '#ff00ff',
+  '#ffff00', '#ffffff', '#ff8800', '#ff0088',
+];
+
+/** 内置的图片准星（随前端打包，选中后由后端复制到本地磁盘）。 */
+const CX_PRESET_IMAGES = [
+  { file: 'cat.png',    name: 'Cat' },
+  { file: 'donk.png',   name: 'donk' },
+  { file: 's1mple.png', name: 's1mple' },
+  { file: 'ropz.png',   name: 'ropz' },
+  { file: 'MMW2.0.png', name: 'MMW 2.0' },
+  { file: 'SSCJ.png',   name: 'SSCJ' },
+  { file: 'TShape.png', name: 'T 字准星' },
+];
+
+/** 图片准星在 Style 字段里用的前缀（后端只在程序绘制时读 Style）。 */
+const CX_PRESET_PREFIX = 'Preset_';
+
+/** 用户预设的本地存储键；一个预设 = 一份完整的准星设置快照。 */
+const CX_PRESETS_KEY = 'gfps.cxPresets';
+
+/** 预览图片的本地缓存键前缀（按图片文件名存 dataURL，重启后预览还在）。 */
+const CX_IMG_CACHE_PREFIX = 'gfps.cxImg:';
+
+/** 当前选中的样式（不在 settings.crosshair 里存 UI 态以外的东西） */
+let cxStyle = 'Cross';
+
+/** 渲染方式：'procedural' 程序绘制 / 'image' 图片绘制（内置预设或自选图片）。 */
+let cxMode = 'procedural';
+
+/** 当前图片准星的本地路径（后端最后落盘的那个）。 */
+let cxImagePath = null;
+
+/** 当前预设图文件名（cxMode === 'preset' 时有效）。 */
+let cxPresetFile = null;
+
+/** 预览用的已解码图片。 */
+let cxPreviewImage = null;
+let cxPreviewImageKey = null;
+
+/**
+ * 后端已落盘的自选图片（和内置预设一起排在网格里）。
+ * NexBox 的做法：选完自己的图，它就变成预设网格里的一格，下次直接点。
+ */
+let cxUserImages = [];
+
+/** 由 init() 注入：把准星改动防抖后下发给后端。 */
+let cxPush = null;
+/** 由 init() 注入：立即下发（点选类操作，不等防抖）。 */
+let cxPushNow = null;
+
+function pushCrosshair() {
+  if (cxPush) cxPush();
+}
+
+function pushCrosshairNow() {
+  if (cxPushNow) cxPushNow();
+}
+
+/** 等待显示器列表就绪后再落位的显示器序号（见 fillCrosshair）。 */
+let cxMonitorPending = null;
+
+function cxColor(hex, opacity) {
+  const h = String(hex || '#ff0000').replace('#', '');
+  const r = parseInt(h.slice(0, 2), 16) || 0;
+  const g = parseInt(h.slice(2, 4), 16) || 0;
+  const b = parseInt(h.slice(4, 6), 16) || 0;
+  const a = Math.max(0, Math.min(255, Number(opacity) || 0)) / 255;
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+/** 从界面读出完整的准星设置；缺的字段沿用后端当前值。 */
+function readCrosshair() {
+  const base = Object.assign({}, (settings && settings.crosshair) || {});
+  const val = (id, fallback) => {
+    const el = $(id);
+    return el ? el.value : fallback;
+  };
+  const num = (id, fallback) => {
+    const raw = val(id, '');
+    // 空字符串不能当 0 —— Number('') 是 0，会把没设置过的控件读成 0
+    if (raw === '' || raw === null || raw === undefined) return fallback;
+    const n = Number(raw);
+    return isFinite(n) ? n : fallback;
+  };
+
+  base.enabled = $('cx-enabled') ? $('cx-enabled').checked : !!base.enabled;
+  base.style = cxStyle;
+  base.size = num('cx-size', base.size ?? 20);
+  base.thickness = num('cx-thickness', base.thickness ?? 2);
+  base.gap = num('cx-gap', base.gap ?? 0);
+  base.dotSize = num('cx-dot', base.dotSize ?? 2);
+  base.opacity = num('cx-opacity', base.opacity ?? 255);
+  base.color = val('cx-color', base.color || '#ff0000');
+  base.outlineEnabled = $('cx-outline-enabled') ? $('cx-outline-enabled').checked : !!base.outlineEnabled;
+  base.outlineColor = val('cx-outline-color', base.outlineColor || '#000000');
+  base.outlineThickness = num('cx-outline-thickness', base.outlineThickness ?? 1);
+  base.monitorIndex = num('cx-monitor', base.monitorIndex ?? -1);
+  base.offsetX = num('cx-offset-x', base.offsetX ?? 0);
+  base.offsetY = num('cx-offset-y', base.offsetY ?? 0);
+  base.hotkeyToggle = val('cx-hotkey', base.hotkeyToggle || 'F8');
+
+  // ---- 渲染方式与图片 ----
+  base.useCustomImage = cxMode !== 'procedural';
+  base.style = cxMode === 'procedural'
+    ? cxStyle
+    : (cxPresetFile ? CX_PRESET_PREFIX + cxPresetFile : 'Custom');
+  base.imageSize = num('cx-image-size', base.imageSize ?? 64);
+  base.customImagePath = base.customImagePath ?? null;
+
+  // ---- 按住显示 ----
+  base.holdEnabled = $('cx-hold-enabled') ? $('cx-hold-enabled').checked : !!base.holdEnabled;
+  base.holdKey = val('cx-hold-key', base.holdKey || 'Mouse2');
+  base.holdDelayMs = num('cx-hold-delay', base.holdDelayMs ?? 0);
+
+  return base;
+}
+
+/** 后端设置 → 界面控件（不含画布重绘，调用方决定何时画）。 */
+function fillCrosshair(c) {
+  if (!c) return;
+
+  // 图片模式时 c.style 是 "Preset_xxx"，不能拿它覆盖程序绘制的样式选择
+  const isPresetStyle = typeof c.style === 'string' && c.style.startsWith(CX_PRESET_PREFIX);
+  if (!isPresetStyle && CX_STYLES.some((s) => s.id === c.style)) cxStyle = c.style;
+
+  cxImagePath = c.customImagePath || null;
+  cxPresetFile = isPresetStyle ? c.style.slice(CX_PRESET_PREFIX.length) : null;
+  cxMode = c.useCustomImage ? 'image' : 'procedural';
+
+  const set = (id, v) => { const el = $(id); if (el) el.value = v; };
+  const check = (id, v) => { const el = $(id); if (el) el.checked = !!v; };
+
+  check('cx-enabled', c.enabled);
+  set('cx-size', c.size ?? 20);
+  set('cx-thickness', c.thickness ?? 2);
+  set('cx-gap', c.gap ?? 0);
+  set('cx-dot', c.dotSize ?? 2);
+  set('cx-opacity', c.opacity ?? 255);
+  set('cx-color', c.color || '#ff0000');
+  check('cx-outline-enabled', c.outlineEnabled);
+  set('cx-outline-color', c.outlineColor || '#000000');
+  set('cx-outline-thickness', c.outlineThickness ?? 1);
+  // 显示器下拉的选项由 displays 消息单独填充，可能与 settings 一先一后到达。
+  // 选项还没建好时给 select 设一个不存在的值会被浏览器置成空串，
+  // 结果就是"选的 2 号屏"被悄悄改回主屏 —— 这里先把它存起来，等列表到了再落位。
+  const monEl = $('cx-monitor');
+  const wantMon = String(c.monitorIndex ?? -1);
+  if (monEl && [...monEl.options].some((o) => o.value === wantMon)) {
+    monEl.value = wantMon;
+    cxMonitorPending = null;
+  } else {
+    cxMonitorPending = wantMon;
+  }
+  set('cx-offset-x', c.offsetX ?? 0);
+  set('cx-offset-y', c.offsetY ?? 0);
+  set('cx-hotkey', c.hotkeyToggle || 'F8');
+  set('cx-image-size', c.imageSize ?? 64);
+  check('cx-hold-enabled', c.holdEnabled);
+  set('cx-hold-key', c.holdKey || 'Mouse2');
+  set('cx-hold-delay', c.holdDelayMs ?? 0);
+
+  const nameEl = $('cx-image-name');
+  if (nameEl) nameEl.textContent = cxImagePath ? basenameOf(cxImagePath) : '未选择图片';
+
+  renderCxStyleButtons();
+  renderCxColors();
+  renderCxRenderMode();
+  renderCxPresetImages();
+  renderCxPresets();
+  refreshCxPreviewImage();
+  syncCxLabels();
+}
+
+function syncCxLabels() {
+  const pairs = [
+    ['cx-size', ''], ['cx-thickness', ''], ['cx-gap', ''],
+    ['cx-dot', ''], ['cx-opacity', ''], ['cx-outline-thickness', ''],
+    ['cx-image-size', ''],
+  ];
+  for (const [id] of pairs) {
+    const el = $(id);
+    const out = $(id + '-val');
+    if (el && out) out.textContent = el.value;
+  }
+}
+
+function renderCxStyleButtons() {
+  const box = $('cx-styles');
+  if (!box) return;
+  box.innerHTML = '';
+  for (const s of CX_STYLES) {
+    const btn = document.createElement('button');
+    btn.className = 'cx-style' + (s.id === cxStyle ? ' active' : '');
+    btn.type = 'button';
+    btn.dataset.style = s.id;
+    btn.innerHTML = `<i>${s.icon}</i><span>${s.name}</span>`;
+    btn.addEventListener('click', () => {
+      cxStyle = s.id;
+      renderCxStyleButtons();
+      drawCrosshairPreview();
+      pushCrosshair();
+    });
+    box.appendChild(btn);
+  }
+}
+
+function renderCxColors() {
+  const box = $('cx-colors');
+  if (!box) return;
+  const current = ($('cx-color') && $('cx-color').value || '').toLowerCase();
+  box.innerHTML = '';
+  for (const c of CX_COLOR_PRESETS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'cx-swatch' + (c === current ? ' active' : '');
+    b.style.background = c;
+    b.title = c;
+    b.addEventListener('click', () => {
+      if ($('cx-color')) $('cx-color').value = c;
+      renderCxColors();
+      drawCrosshairPreview();
+      pushCrosshair();
+    });
+    box.appendChild(b);
+  }
+}
+
+/** 显示器下拉框。value 用 -1 表示主显示器。 */
+function renderDisplays(list) {
+  const sel = $('cx-monitor');
+  if (!sel) return;
+
+  // 重建选项会把选择清掉，先把界面当前真正选中的那个记下来
+  const before = sel.value;
+  sel.innerHTML = '';
+
+  const auto = document.createElement('option');
+  auto.value = '-1';
+  auto.textContent = '主显示器（跟随系统）';
+  sel.appendChild(auto);
+
+  (Array.isArray(list) ? list : []).forEach((d) => {
+    const opt = document.createElement('option');
+    opt.value = String(d.index);
+    opt.textContent = `${d.name} · ${d.width}×${d.height}${d.primary ? ' · 主' : ''}`;
+    sel.appendChild(opt);
+  });
+
+  // 优先级：等列表落位的待定值 → 界面原本选中的 → 设置里的值 → 主屏。
+  // 待定值排在前面，因为它来自后端设置；此时下拉里往往只有默认的 "-1"，
+  // 那个 -1 只是 HTML 的初始项，不是用户的选择。
+  const has = (v) => [...sel.options].some((o) => o.value === v);
+  let wanted = null;
+
+  if (cxMonitorPending !== null && has(cxMonitorPending)) {
+    wanted = cxMonitorPending;
+  }
+  cxMonitorPending = null;
+
+  if (wanted === null && before && has(before)) wanted = before;
+
+  if (wanted === null) {
+    const fromSettings = String((settings && settings.crosshair && settings.crosshair.monitorIndex) ?? -1);
+    wanted = has(fromSettings) ? fromSettings : '-1';
+  }
+
+  sel.value = wanted;
+  if (sel.value !== wanted) sel.value = '-1';   // 该序号已不存在（拔了屏）→ 回主屏
+}
+
+/** 画布预览：按与 C# 相同的几何实时还原准星外观。 */
+/** 取文件名部分（兼容 Windows 反斜杠路径）。 */
+function basenameOf(p) {
+  return String(p || '').split(/[\\/]/).pop();
+}
+
+/**
+ * 收到后端的自选图列表：更新网格。
+ * 自选图和内置预设并排 —— 这就是 NexBox 的行为，选过的图下次直接点。
+ */
+function renderCxUserImages(list) {
+  cxUserImages = list
+    .map((it) => ({ name: it.name || basenameOf(it.path), path: it.path }))
+    .filter((it) => it.name);
+  renderCxPresetImages();
+}
+
+/**
+ * 把 app/src 下的资源读成 dataURL。
+ * 页面以 file:// 加载，渲染进程里 fetch 本地文件会被 Chromium 拒绝，
+ * 所以优先走 preload 的 Node 桥；浏览器里直接打开时回落到相对 URL。
+ */
+function readAssetDataUrl(rel) {
+  try {
+    if (window.gamefps && typeof window.gamefps.readAssetDataUrl === 'function') {
+      return window.gamefps.readAssetDataUrl(rel);
+    }
+  } catch { /* 桥不可用就走回落分支 */ }
+  return null;
+}
+
+/** 渲染方式分段按钮：切换时同步面板可见性。 */
+function renderCxRenderMode() {
+  const seg = $('cx-render-mode');
+  if (seg) {
+    for (const btn of seg.querySelectorAll('.cx-seg')) {
+      btn.classList.toggle('active', btn.dataset.mode === cxMode);
+    }
+  }
+
+  const panel = $('cx-image-panel');
+  const note = $('cx-procedural-note');
+  if (panel) panel.hidden = cxMode === 'procedural';
+  if (note) note.hidden = cxMode !== 'procedural';
+
+  // 程序绘制的那几个参数在图片模式下不起作用，直接藏掉，免得误导
+  const styleBox = $('cx-styles');
+  if (styleBox) styleBox.hidden = cxMode !== 'procedural';
+}
+
+/** 内置预设 + 已导入的自选图，一起排成缩略图网格。 */
+function renderCxPresetImages() {
+  const box = $('cx-preset-images');
+  if (!box) return;
+  box.innerHTML = '';
+
+  const activeName = cxMode === 'image'
+    ? (cxPresetFile || (cxImagePath ? basenameOf(cxImagePath) : null))
+    : null;
+
+  // 内置预设
+  for (const p of CX_PRESET_IMAGES) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'cx-preset-img' + (activeName === p.file ? ' active' : '');
+    btn.title = p.name;
+    const img = document.createElement('img');
+    const thumbRel = `assets/crosshair-presets/${p.file}`;
+    img.src = readAssetDataUrl(thumbRel) || `./${thumbRel}`;
+    img.alt = p.name;
+    btn.appendChild(img);
+    const label = document.createElement('span');
+    label.textContent = p.name;
+    btn.appendChild(label);
+    btn.addEventListener('click', () => applyCxPresetImage(p.file));
+    box.appendChild(btn);
+  }
+
+  // 用户自己导入的图：和预设并排，一格一张
+  for (const u of cxUserImages) {
+    const name = u.name || basenameOf(u.path || '');
+    if (!name) continue;
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'cx-preset-img own' + (activeName === name ? ' active' : '');
+    btn.title = name;
+
+    const img = document.createElement('img');
+    img.alt = name;
+    // 自选图的字节在 localStorage 里有缓存；没缓存就先留空，等图片列表回推后补
+    const cached = localStorage.getItem(CX_IMG_CACHE_PREFIX + name);
+    if (cached) img.src = cached;
+    else {
+      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">' +
+        '<rect width="64" height="64" fill="#2a2a2a"/></svg>');
+    }
+    btn.appendChild(img);
+
+    const label = document.createElement('span');
+    label.textContent = name;
+    btn.appendChild(label);
+    btn.addEventListener('click', () => applyCxUserImage(name));
+    box.appendChild(btn);
+  }
+}
+
+/** 应用一张已落盘的自选图（字节从 localStorage 缓存取，没有就重新要一次）。 */
+async function applyCxUserImage(name) {
+  cxMode = 'image';
+  cxPresetFile = name;
+  renderCxRenderMode();
+  renderCxPresetImages();
+
+  const nameEl = $('cx-image-name');
+  if (nameEl) nameEl.textContent = name;
+
+  const cached = localStorage.getItem(CX_IMG_CACHE_PREFIX + name);
+  if (cached) {
+    send({ type: 'setCrosshairImage', data: { name, dataUrl: cached } });
+    await refreshCxPreviewImage(name);
+    drawCrosshairPreview();
+  }
+  // 没缓存说明是本机已落盘但界面还没见过这张图，后端会按现有路径直接应用
+}
+
+/** 选中内置预设图：把图片字节发给后端落盘，后端随即把路径写进设置。 */
+async function applyCxPresetImage(file) {
+  const rel = `assets/crosshair-presets/${file}`;
+  let dataUrl = readAssetDataUrl(rel);
+
+  if (!dataUrl) {
+    try {
+      const res = await fetch(`./${rel}`);
+      const blob = await res.blob();
+      dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    } catch (err) {
+      console.warn('预设图片加载失败', err);
+      return;
+    }
+  }
+
+  cxMode = 'image';
+  cxPresetFile = file;
+  renderCxRenderMode();
+  renderCxPresetImages();
+  const nameEl = $('cx-image-name');
+  if (nameEl) nameEl.textContent = file;      // 后端回推路径之前先显示文件名
+  await sendCxImage(file, dataUrl);
+}
+
+/** 用户自选图片。 */
+function pickCxImage(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async () => {
+    cxMode = 'image';
+    // 选自己的图 = 选中网格里「这一格」，文件名就是这一格的标识
+    cxPresetFile = basenameOf(file.name);
+    renderCxRenderMode();
+    const nameEl = $('cx-image-name');
+    if (nameEl) nameEl.textContent = file.name;
+    await sendCxImage(file.name, String(reader.result));
+  };
+  reader.readAsDataURL(file);
+}
+
+/**
+ * 把图片交给后端：后端解码后写到 %LOCALAPPDATA%\GameFPS\crosshair\，
+ * 再把 UseCustomImage / CustomImagePath 写进设置并回推 —— 前端不直接碰磁盘。
+ */
+async function sendCxImage(name, dataUrl) {
+  rememberCxImage(name, dataUrl);
+  send({ type: 'setCrosshairImage', data: { name, dataUrl } });
+  await refreshCxPreviewImage(name);
+  drawCrosshairPreview();
+  // 后端落盘后会回推 crosshairImages；这里先乐观插进网格，
+  // 免得用户选完图要等一个来回才在预设里看到它
+  const bare = basenameOf(name);
+  if (bare && !cxUserImages.some((u) => u.name === bare)) {
+    cxUserImages.push({ name: bare, path: null });
+    renderCxPresetImages();
+  }
+}
+
+/** 按文件名缓存图片 dataURL，供预览与重启后复用。 */
+function rememberCxImage(name, dataUrl) {
+  try {
+    localStorage.setItem(CX_IMG_CACHE_PREFIX + basenameOf(name), dataUrl);
+  } catch { /* 配额满了就只丢了预览缓存 */ }
+}
+
+/** 载入预览图片：本地缓存优先，预设图回落到打包资源。 */
+function refreshCxPreviewImage(explicitName) {
+  let key = null;
+  let src = null;
+
+  if (cxMode === 'image') {
+    if (cxPresetFile) {
+      key = cxPresetFile;
+      src = localStorage.getItem(CX_IMG_CACHE_PREFIX + key)
+        || `./assets/crosshair-presets/${key}`;
+    } else {
+      key = explicitName ? basenameOf(explicitName) : (cxImagePath ? basenameOf(cxImagePath) : null);
+      if (key) src = localStorage.getItem(CX_IMG_CACHE_PREFIX + key);
+    }
+  }
+
+  if (!src) {
+    cxPreviewImage = null;
+    cxPreviewImageKey = null;
+    return;
+  }
+
+  if (cxPreviewImageKey === src) return;
+
+  const img = new Image();
+  img.onload = () => {
+    cxPreviewImage = img;
+    cxPreviewImageKey = src;
+    drawCrosshairPreview();
+  };
+  img.onerror = () => {
+    cxPreviewImage = null;
+    cxPreviewImageKey = null;
+    drawCrosshairPreview();
+  };
+  img.src = src;
+}
+
+// ---------- 我的预设 ----------
+
+function readCxPresets() {
+  try {
+    const raw = localStorage.getItem(CX_PRESETS_KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeCxPresets(list) {
+  try {
+    localStorage.setItem(CX_PRESETS_KEY, JSON.stringify(list));
+  } catch { /* 存不下就静默失败，不影响当前准星 */ }
+}
+
+/** 准星的出厂参数（「恢复默认」用）。 */
+function cxDefaults() {
+  return {
+    enabled: (settings && settings.crosshair && settings.crosshair.enabled) || false,
+    useCustomImage: false,
+    style: 'Cross',
+    size: 20,
+    thickness: 2,
+    color: '#ff0000',
+    gap: 0,
+    dotSize: 2,
+    opacity: 255,
+    imageSize: 64,
+    customImagePath: null,
+    monitorIndex: -1,
+    offsetX: 0,
+    offsetY: 0,
+    outlineEnabled: false,
+    outlineColor: '#000000',
+    outlineThickness: 1,
+    hotkeyToggle: 'F8',
+    holdEnabled: false,
+    holdKey: 'Mouse2',
+    holdDelayMs: 0,
+  };
+}
+
+function renderCxPresets() {
+  const box = $('cx-presets');
+  if (!box) return;
+
+  const list = readCxPresets();
+  box.innerHTML = '';
+
+  const empty = $('cx-presets-empty');
+  if (empty) empty.hidden = list.length > 0;
+
+  for (const preset of list) {
+    const card = document.createElement('div');
+    card.className = 'cx-preset-card';
+
+    const name = document.createElement('b');
+    name.textContent = preset.name;
+    card.appendChild(name);
+
+    const meta = document.createElement('span');
+    meta.className = 'muted small';
+    meta.textContent = describeCxPreset(preset.settings);
+    card.appendChild(meta);
+
+    const actions = document.createElement('div');
+    actions.className = 'cx-preset-actions';
+
+    const useBtn = document.createElement('button');
+    useBtn.type = 'button';
+    useBtn.className = 'mini';
+    useBtn.textContent = '应用';
+    useBtn.addEventListener('click', () => {
+      fillCrosshair(preset.settings);
+      drawCrosshairPreview();
+      pushCrosshairNow();
+    });
+
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'mini danger';
+    delBtn.textContent = '删除';
+    delBtn.addEventListener('click', () => {
+      writeCxPresets(readCxPresets().filter((p) => p.id !== preset.id));
+      renderCxPresets();
+    });
+
+    actions.appendChild(useBtn);
+    actions.appendChild(delBtn);
+    card.appendChild(actions);
+    box.appendChild(card);
+  }
+}
+
+function describeCxPreset(c) {
+  if (!c) return '';
+  if (c.useCustomImage) {
+    const file = String(c.style || '').startsWith(CX_PRESET_PREFIX)
+      ? String(c.style).slice(CX_PRESET_PREFIX.length)
+      : basenameOf(c.customImagePath || '自定义图片');
+    return `图片 · ${file}`;
+  }
+  const style = CX_STYLES.find((s) => s.id === c.style);
+  return `${style ? style.name : '十字'} · 大小 ${c.size} · ${c.color}`;
+}
+
+/**
+ * 打开预设命名对话框。
+ * 注意不能用 window.prompt：Electron 渲染进程里 prompt 是被禁用的，
+ * 调用直接返回 null，表现就是"点了按钮没反应"。
+ */
+function openCxPresetDialog() {
+  const dlg = $('cx-preset-dialog');
+  const input = $('cx-preset-name');
+  if (!dlg || !input) return;
+
+  input.value = `准星 ${readCxPresets().length + 1}`;
+  dlg.hidden = false;
+  input.focus();
+  input.select();
+}
+
+function closeCxPresetDialog() {
+  const dlg = $('cx-preset-dialog');
+  if (dlg) dlg.hidden = true;
+}
+
+function commitCxPreset() {
+  const input = $('cx-preset-name');
+  const name = (input ? input.value : '').trim();
+  if (!name) { if (input) input.focus(); return; }
+
+  const list = readCxPresets();
+  list.push({
+    id: `preset_${Date.now()}`,
+    name,
+    settings: readCrosshair(),
+  });
+  writeCxPresets(list);
+  renderCxPresets();
+  closeCxPresetDialog();
+}
+
+/**
+ * 按住键录制：键盘键走 keydown，鼠标键走 mousedown（右键要拦掉 contextmenu，
+ * 否则会同时弹出右键菜单）。输出与后端 CrosshairHold.ParseKey 对齐。
+ */
+function setupCxHoldRecorder() {
+  const el = $('cx-hold-key');
+  if (!el) return;
+
+  const commit = (token) => {
+    el.value = token;
+    pushCrosshairNow();
+  };
+
+  const keyToken = (e) => {
+    if (e.key === 'Escape' || e.key === 'Esc') { el.blur(); return null; }
+    if (e.key === ' ') return 'Space';
+    if (e.key.length === 1) return e.key.toUpperCase();
+    if (/^F\d{1,2}$/.test(e.key)) return e.key.toUpperCase();
+    const map = {
+      ArrowUp: 'Up', ArrowDown: 'Down', ArrowLeft: 'Left', ArrowRight: 'Right',
+      Control: 'ControlKey', Shift: 'ShiftKey', Alt: 'Menu', Meta: 'LWin',
+      Enter: 'Return', Tab: 'Tab', Backspace: 'Back', Delete: 'Delete',
+      Home: 'Home', End: 'End', PageUp: 'PageUp', PageDown: 'PageDown',
+      Insert: 'Insert', CapsLock: 'CapsLock',
+    };
+    return map[e.key] || e.key;
+  };
+
+  el.addEventListener('keydown', (e) => {
+    e.preventDefault();
+    const token = keyToken(e);
+    if (token) commit(token);
+  });
+
+  el.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    const map = { 0: 'Mouse1', 1: 'Mouse3', 2: 'Mouse2', 3: 'Mouse4', 4: 'Mouse5' };
+    const token = map[e.button];
+    if (token) commit(token);
+  });
+
+  el.addEventListener('contextmenu', (e) => e.preventDefault());
+}
+
+/// 预览用的 alpha 能量补偿：与后端 PrepareSource + BoostAlpha 保持同一策略。
+/// 细线图（donk 只有 99 个非透明像素）一次性缩到 64px，覆盖率被插值摊到更大
+/// 面积上，单像素亮度掉光；按 alpha 总和补一个增益就恢复可见、且线条不会变粗。
+function downscaleForPreview(img, target) {
+  const w = img.naturalWidth || img.width;
+  const h = img.naturalHeight || img.height;
+  if (!w || !h || target >= w) return img;
+
+  try {
+    const c = document.createElement('canvas');
+    c.width = target;
+    c.height = target;
+    const cg = c.getContext('2d');
+    cg.imageSmoothingEnabled = true;
+    cg.imageSmoothingQuality = 'high';
+    cg.clearRect(0, 0, target, target);
+    cg.drawImage(img, 0, 0, target, target);
+
+    // 源图 alpha 总量（在后端是 ToBitmap 后逐像素累加，这里等价）
+    const srcCv = document.createElement('canvas');
+    srcCv.width = w;
+    srcCv.height = h;
+    const sg = srcCv.getContext('2d');
+    sg.drawImage(img, 0, 0, w, h);
+    const srcA = sg.getImageData(0, 0, w, h).data;
+
+    let srcEnergy = 0;
+    for (let i = 3; i < srcA.length; i += 4) srcEnergy += srcA[i];
+    if (srcEnergy <= 0) return c;
+
+    const dst = cg.getImageData(0, 0, target, target);
+    let dstEnergy = 0;
+    for (let i = 3; i < dst.data.length; i += 4) dstEnergy += dst.data[i];
+    if (dstEnergy <= 0) return c;
+
+    const gain = Math.min(8, srcEnergy / dstEnergy);
+    if (gain <= 1.05) return c;
+
+    for (let i = 3; i < dst.data.length; i += 4) {
+      const a = dst.data[i];
+      if (a === 0) continue;
+      dst.data[i] = Math.min(255, Math.round(a * gain));
+    }
+    cg.putImageData(dst, 0, 0);
+    return c;
+  } catch (e) {
+    return img;
+  }
+}
+
+function drawCrosshairPreview() {
+  const cv = $('cx-preview');
+  if (!cv) return;
+
+  const rect = cv.getBoundingClientRect();
+  const w = Math.max(1, Math.round(rect.width || 240));
+  const h = Math.max(1, Math.round(rect.height || 240));
+  const dpr = window.devicePixelRatio || 1;
+
+  if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
+    cv.width = Math.round(w * dpr);
+    cv.height = Math.round(h * dpr);
+  }
+
+  const g = cv.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+
+  const s = readCrosshair();
+
+  // 图片准星：后端把图片拉伸成正方形画在 size×size 内，这里用同样的几何预览，
+  // 透明度也照样作用在图上，做到"预览即所见"。
+  if (cxMode !== 'procedural' && cxPreviewImage) {
+    const target = Math.max(8, Number(s.imageSize) || 64);
+    const scale = Math.min(1, (Math.min(w, h) - 24) / target);
+    const draw = target * scale;
+    g.globalAlpha = Math.max(0, Math.min(255, Number(s.opacity) || 0)) / 255;
+    // 后端 RenderImageBitmap 会先把大图预缩到目标尺寸的 3 倍再画，
+    // 避免细线图（donk/s1mple/TShape 这类）被一次性双三次拉糊。
+    // 这里同样走一遍中间尺寸，否则预览会比实际准星更暗、更看不清。
+    const src = downscaleForPreview(cxPreviewImage, Math.round(draw));
+    g.drawImage(src, (w - draw) / 2, (h - draw) / 2, draw, draw);
+    g.globalAlpha = 1;
+    return;
+  }
+
+  const thickness = Math.max(1, s.thickness);
+  const outline = s.outlineEnabled && s.outlineThickness > 0 ? s.outlineThickness : 0;
+  const half = thickness / 2 + outline;
+  const span = Math.max(
+    s.gap + s.size + half,
+    s.size + half,
+    s.dotSize / 2 + outline,
+    3,
+  );
+
+  const scale = Math.min(1, (Math.min(w, h) / 2 - 10) / span);
+
+  g.save();
+  g.translate(w / 2, h / 2);
+  g.scale(scale, scale);
+  g.lineCap = 'round';
+  g.lineJoin = 'miter';
+
+  const main = cxColor(s.color, s.opacity);
+  const line = cxColor(s.outlineColor, s.opacity);
+  const size = Math.max(1, s.size);
+  const gap = Math.max(0, s.gap);
+  const dot = Math.max(0, s.dotSize);
+
+  const arms = (color, width) => {
+    g.strokeStyle = color;
+    g.lineWidth = width;
+    g.beginPath();
+    g.moveTo(0, -gap - size); g.lineTo(0, -gap);
+    g.moveTo(0, gap);         g.lineTo(0, gap + size);
+    g.moveTo(-gap - size, 0); g.lineTo(-gap, 0);
+    g.moveTo(gap, 0);         g.lineTo(gap + size, 0);
+    g.stroke();
+  };
+  const ring = (color, width, extra) => {
+    g.strokeStyle = color;
+    g.lineWidth = width;
+    g.beginPath();
+    g.arc(0, 0, size + extra, 0, Math.PI * 2);
+    g.stroke();
+  };
+  const boxRect = (color, width, extra) => {
+    g.strokeStyle = color;
+    g.lineWidth = width;
+    g.strokeRect(-(size + extra), -(size + extra), (size + extra) * 2, (size + extra) * 2);
+  };
+  const dotCircle = (color, d) => {
+    if (d <= 0) return;
+    g.fillStyle = color;
+    g.beginPath();
+    g.arc(0, 0, d / 2, 0, Math.PI * 2);
+    g.fill();
+  };
+
+  const ow = thickness + outline * 2;
+
+  switch (s.style) {
+    case 'Dot':
+      if (outline > 0) dotCircle(line, dot + outline * 2);
+      dotCircle(main, dot);
+      break;
+    case 'Circle':
+      if (outline > 0) ring(line, ow, outline);
+      ring(main, thickness, 0);
+      break;
+    case 'CrossDot':
+      if (outline > 0) { arms(line, ow); dotCircle(line, dot + outline * 2); }
+      arms(main, thickness);
+      dotCircle(main, dot);
+      break;
+    case 'CircleCross':
+      if (outline > 0) { ring(line, ow, outline); arms(line, ow); }
+      ring(main, thickness, 0);
+      arms(main, thickness);
+      break;
+    case 'DotBox':
+      if (outline > 0) { boxRect(line, ow, outline); dotCircle(line, dot + outline * 2); }
+      boxRect(main, thickness, 0);
+      dotCircle(main, dot);
+      break;
+    default:
+      if (outline > 0) arms(line, ow);
+      arms(main, thickness);
+      break;
+  }
+
+  g.restore();
+}
+
 /* ===================== 设置页 ===================== */
 
 const FIELDS = [
@@ -866,6 +1758,10 @@ function fillSettings(s) {
 
   // 手动目标的进程名不在 FIELDS 里，由监控页顶部下拉框承载
   syncRangeLabels();
+
+  // 准星页：控件回填 + 预览重绘
+  fillCrosshair(s.crosshair);
+  drawCrosshairPreview();
 }
 
 function collectSettings() {
@@ -895,6 +1791,9 @@ function collectSettings() {
   out.overlayBlocks = gridState.blocks.map((b) => ({ type: b.type, row: b.row, col: b.col }));
   out.gridRows = gridState.rows;
   out.gridCols = gridState.cols;
+
+  // 屏幕准星（嵌套对象，随设置一起往返）
+  out.crosshair = readCrosshair();
 
   return out;
 }
@@ -1265,6 +2164,12 @@ function init() {
       if (btn.dataset.page === 'history') send({ type: 'getSessions' });
       if (btn.dataset.page === 'settings') send({ type: 'getCandidates' });
       if (btn.dataset.page === 'monitor') send({ type: 'getCandidates' });
+      if (btn.dataset.page === 'crosshair') {
+        // 画布在隐藏页里量出来的尺寸是 0，显示后必须重画一次
+        send({ type: 'getDisplays' });
+        send({ type: 'getCrosshairImages' });
+        drawCrosshairPreview();
+      }
     });
   });
 
@@ -1355,6 +2260,167 @@ function init() {
   // 热键录制：点输入框后直接按组合键
   setupHotkeyRecorder($('s-hotkeyToggleOverlay'), pushSettings);
   setupHotkeyRecorder($('s-hotkeyOpenMain'), pushSettings);
+  setupHotkeyRecorder($('cx-hotkey'), pushSettings);
+
+  // ---------- 准星页 ----------
+  // 准星改动同样走热更新：拖滑块防抖，点选类立即下发
+  cxPush = () => pushSettings(false);
+  const cxNow = () => pushSettings(true);
+  cxPushNow = cxNow;
+
+  for (const id of ['cx-size', 'cx-thickness', 'cx-gap', 'cx-dot', 'cx-opacity', 'cx-outline-thickness']) {
+    const el = $(id);
+    if (!el) continue;
+    el.addEventListener('input', () => { syncCxLabels(); drawCrosshairPreview(); cxPush(); });
+    el.addEventListener('change', () => { syncCxLabels(); drawCrosshairPreview(); cxNow(); });
+  }
+
+  for (const id of ['cx-offset-x', 'cx-offset-y']) {
+    const el = $(id);
+    if (!el) continue;
+    el.addEventListener('input', () => drawCrosshairPreview());
+    el.addEventListener('change', () => { drawCrosshairPreview(); cxNow(); });
+  }
+
+  const cxEnabledEl = $('cx-enabled');
+  if (cxEnabledEl) {
+    cxEnabledEl.addEventListener('change', () => { drawCrosshairPreview(); cxNow(); });
+  }
+
+  const cxColorEl = $('cx-color');
+  if (cxColorEl) {
+    cxColorEl.addEventListener('input', () => { renderCxColors(); drawCrosshairPreview(); cxPush(); });
+    cxColorEl.addEventListener('change', () => { renderCxColors(); drawCrosshairPreview(); cxNow(); });
+  }
+
+  const cxOutlineEl = $('cx-outline-enabled');
+  if (cxOutlineEl) {
+    cxOutlineEl.addEventListener('change', () => { drawCrosshairPreview(); cxNow(); });
+  }
+
+  const cxOutlineColorEl = $('cx-outline-color');
+  if (cxOutlineColorEl) {
+    cxOutlineColorEl.addEventListener('input', () => { drawCrosshairPreview(); cxPush(); });
+    cxOutlineColorEl.addEventListener('change', () => { drawCrosshairPreview(); cxNow(); });
+  }
+
+  const cxMonitorEl = $('cx-monitor');
+  if (cxMonitorEl) cxMonitorEl.addEventListener('change', () => cxNow());
+
+  const btnDisplays = $('btn-refresh-displays');
+  if (btnDisplays) btnDisplays.addEventListener('click', () => send({ type: 'getDisplays' }));
+
+  // 渲染方式：程序绘制 / 预设图片 / 自定义图片
+  const cxModeBox = $('cx-render-mode');
+  if (cxModeBox) {
+    for (const btn of cxModeBox.querySelectorAll('.cx-seg')) {
+      btn.addEventListener('click', async () => {
+        const mode = btn.dataset.mode;
+        if (mode === cxMode) return;
+
+        if (mode === 'procedural') {
+          cxMode = 'procedural';
+          renderCxRenderMode();
+          renderCxPresetImages();
+          drawCrosshairPreview();
+          cxNow();
+          return;
+        }
+
+        // 图片绘制：手上已有图（预设或自选）就直接沿用，没有就默认第一张预设，
+        // 免得"切过去了但画面上还是空参数"
+        if (cxPresetFile) {
+          await applyCxPresetImage(cxPresetFile);
+        } else if (cxImagePath) {
+          cxMode = 'image';
+          renderCxRenderMode();
+          renderCxPresetImages();
+          refreshCxPreviewImage();
+          drawCrosshairPreview();
+          cxNow();
+        } else {
+          await applyCxPresetImage(CX_PRESET_IMAGES[0].file);
+        }
+      });
+    }
+  }
+
+  const cxImageSize = $('cx-image-size');
+  if (cxImageSize) {
+    cxImageSize.addEventListener('input', () => { syncCxLabels(); drawCrosshairPreview(); cxPush(); });
+    cxImageSize.addEventListener('change', () => { syncCxLabels(); drawCrosshairPreview(); cxNow(); });
+  }
+
+  const cxImageFile = $('cx-image-file');
+  if (cxImageFile) {
+    cxImageFile.addEventListener('change', () => {
+      const f = cxImageFile.files && cxImageFile.files[0];
+      if (f) pickCxImage(f);
+      cxImageFile.value = '';        // 允许连续选同一个文件
+    });
+  }
+
+  const btnPickImage = $('btn-cx-pick-image');
+  if (btnPickImage) {
+    btnPickImage.addEventListener('click', () => {
+      const el = $('cx-image-file');
+      if (el) el.click();
+    });
+  }
+
+  const cxHoldEnabledEl = $('cx-hold-enabled');
+  if (cxHoldEnabledEl) cxHoldEnabledEl.addEventListener('change', () => cxNow());
+
+  const cxHoldDelayEl = $('cx-hold-delay');
+  if (cxHoldDelayEl) {
+    cxHoldDelayEl.addEventListener('input', () => cxPush());
+    cxHoldDelayEl.addEventListener('change', () => cxNow());
+  }
+
+  setupCxHoldRecorder();
+
+  const btnSavePreset = $('btn-cx-save-preset');
+  if (btnSavePreset) btnSavePreset.addEventListener('click', openCxPresetDialog);
+
+  const btnPresetOk = $('btn-cx-preset-ok');
+  if (btnPresetOk) btnPresetOk.addEventListener('click', commitCxPreset);
+
+  const btnPresetCancel = $('btn-cx-preset-cancel');
+  if (btnPresetCancel) btnPresetCancel.addEventListener('click', closeCxPresetDialog);
+
+  const presetNameEl = $('cx-preset-name');
+  if (presetNameEl) {
+    presetNameEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); commitCxPreset(); }
+      else if (e.key === 'Escape') { e.preventDefault(); closeCxPresetDialog(); }
+    });
+  }
+
+  const presetDlg = $('cx-preset-dialog');
+  if (presetDlg) {
+    presetDlg.addEventListener('click', (e) => {
+      if (e.target === presetDlg) closeCxPresetDialog();   // 点遮罩关闭
+    });
+  }
+
+  const btnResetCx = $('btn-cx-reset-default');
+  if (btnResetCx) {
+    btnResetCx.addEventListener('click', () => {
+      closeCxPresetDialog();
+      fillCrosshair(cxDefaults());
+      drawCrosshairPreview();
+      cxNow();
+    });
+  }
+
+  renderCxStyleButtons();
+  renderCxColors();
+  renderCxRenderMode();
+  renderCxPresetImages();
+  renderCxPresets();
+  refreshCxPreviewImage();
+  syncCxLabels();
+  drawCrosshairPreview();
 
   // 显示项：可勾选 + 拖动/箭头排序，改动即时下发
   renderOrderList((field, checked) => {
@@ -1436,6 +2502,7 @@ function init() {
     const s = latest || {};
     drawChart(s.recentFrameTimes || [], s.low1PercentHistory || [], s.low01PercentHistory || []);
     drawFrameTimeChart(s.recentFrameTimes || []);
+    drawCrosshairPreview();
   });
 
   // 支持用 #monitor / #history / #settings 直接打开对应页签
