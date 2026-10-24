@@ -813,7 +813,7 @@ let cxPreviewImageKey = null;
 
 /**
  * 后端已落盘的自选图片（和内置预设一起排在网格里）。
- * 游戏盒的做法：选完自己的图，它就变成预设网格里的一格，下次直接点。
+ * NexBox 的做法：选完自己的图，它就变成预设网格里的一格，下次直接点。
  */
 let cxUserImages = [];
 
@@ -1050,7 +1050,7 @@ function basenameOf(p) {
 
 /**
  * 收到后端的自选图列表：更新网格。
- * 自选图和内置预设并排 —— 这就是游戏盒的行为，选过的图下次直接点。
+ * 自选图和内置预设并排 —— 这就是 NexBox 的行为，选过的图下次直接点。
  */
 function renderCxUserImages(list) {
   cxUserImages = list

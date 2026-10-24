@@ -188,7 +188,7 @@ public sealed class AppHost : IDisposable
                new { type = "candidates", data = _engine.GetCandidates() }, JsonOpts));
 
     /// <summary>
-    /// 已导入的自选图片列表。游戏盒的做法是：选完自己的图片，它就变成预设网格里的
+    /// 已导入的自选图片列表。NexBox 的做法是：选完自己的图片，它就变成预设网格里的
     /// 一格，和内置预设并排，下次直接点。这里照做 —— 前端点「选择本地图片」时把图
     /// 交给后端落盘，落盘后再把整个目录列回去，前端重新渲染网格。
     /// </summary>

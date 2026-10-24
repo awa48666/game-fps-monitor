@@ -6,6 +6,18 @@
 采集全程 **不向游戏进程注入任何代码**，走 Windows 内核 ETW 事件（与 Intel PresentMon / CapFrameX 同一路线），
 因此不存在被反作弊判定为外挂的风险。
 
+> **本项目完全由 Vibe Coding 写成。**
+> 从第一行代码到现在的每一个功能、每一次修复、每一版打包，全部是
+> 「人提需求 → AI 写码 → 人装机验证 → 反馈现象 → AI 再修」这个循环跑出来的，
+> 没有手工逐行编写的部分。README 里那些「为什么这样做」的段落，
+> 也是在这一来一回里被追问出来的。
+>
+> 这意味着两件事：**一**，代码风格和注释密度带有明显的 AI 痕迹，抽象层次不总是最优，
+> 个别地方存在过度设计；**二**，它的正确性来自反复的真机验证和日志取证，而不是来自
+> 作者多年的 Windows 系统编程经验 —— 所以遇到问题时，日志比猜测有用得多。
+>
+> 如果你在阅读中发现某处「看起来像 AI 会犯的错」，它很可能真的是。
+
 ---
 
 ## 直接下载使用（推荐）
@@ -13,8 +25,8 @@
 不想编译的话，去 **[Releases](https://github.com/awa48666/game-fps-monitor/releases/latest)** 下载：
 
 ```
-GameFPS-v1.0.11-win-x64.zip    约 180 MB   （任何 Windows 直接解压）
-GameFPS-v1.0.11-win-x64.7z     约 117 MB   （体积更小，需 7-Zip 或 Win11）
+GameFPS-v1.0.12-win-x64.zip    约 180 MB   （任何 Windows 直接解压）
+GameFPS-v1.0.12-win-x64.7z     约 117 MB   （体积更小，需 7-Zip 或 Win11）
 ```
 
 解压后双击 `GameFPS.exe` 即可。**包内已内置 .NET 10 与 Electron，不需要额外安装任何运行时。**
@@ -38,6 +50,7 @@ WinForms 设计器、调试符号读取器、非中文卫星资源等），共�
 <details>
 <summary>版本历史</summary>
 
+- **v1.0.12** — README 补齐准星来源说明（参考 [NexBox](https://github.com/MuLiuSaMa/NexBox)，7 张预设图取自该项目）；首页注明本项目完全由 Vibe Coding 写成
 - **v1.0.11** — 修「闪一下就没了」（准星重复 Dispose 缓存位图，GDI+ 报 `ArgumentException`）；CPU 频率改用 `CallNtPowerInformation` 实测（`Actual Frequency` 计数器在不少机器上恒为 0）；自选图片导入后并入预设网格，和内置预设并排、下次直接点
 - **v1.0.10** — 修三处「勾了却不显示」：样式2 大核/小核补上频率；SSCJ 预设图因单帧 16 KB 限制被截断而静默失败（改为按分片拼接）；准星显示一段时间后消失（加看门狗每秒重申置顶并补推位图，同时不再静默吞异常，新增 `crosshair.log`）。细线预设图缩放后 alpha 补偿，donk/s1mple/TShape 不再糊成一片
 - **v1.0.9** — 修「保存当前设置为准星预设」点了没反应（Electron 禁用 `window.prompt`，改成自绘对话框）；渲染方式合并为「程序绘制 / 图片绘制」两档，预设图与自选图放在同一面板
@@ -206,6 +219,21 @@ ETW 的 **realtime 会话在宿主进程被强制终止（taskkill / 任务管�
 实现半透明、点击穿透、不抢焦点、始终置顶。
 
 ### 4.1 屏幕准星
+
+> **来源说明**
+>
+> 准星功能的**参数设计、样式定义与交互流程参考 [NexBox](https://github.com/MuLiuSaMa/NexBox)**
+> （Tauri + Rust + React 实现，仓库未提供 LICENSE 文件）。本项目用 **C# + WinForms 重新实现**，
+> 与仓库原有架构保持一致 —— 搬过来的是「功能」（参数集合、几何形状、交互流程），
+> 不是代码。得益于两侧语言、框架与进程模型完全不同，本仓库中**没有一行准星代码来自该项目**。
+>
+> **7 张内置预设图**（`cat` / `donk` / `s1mple` / `ropz` / `MMW2.0` / `SSCJ` / `TShape`）
+> **直接取自该项目**，原样保留，仅随功能一起分发。由于上游没有 LICENSE，
+> 这组图片的版权归原作者所有；如果你是原作者并希望移除，开个 issue 即可。
+>
+> 以下部分均为**独立实现**，与参考项目无关：几何绘制的具体坐标计算、
+> `UpdateLayeredWindow` 预乘 Alpha 推送、按住检测的轮询方案、
+> 预设的 `localStorage` 存储、图片落盘与回读、以及全部前端代码。
 
 准星和悬浮窗是同一套机制的两个应用，都是 C# 侧的分层窗口（`CrosshairForm.cs` / `OverlayForm.cs`），
 同样用 `UpdateLayeredWindow` 推**预乘 Alpha** 位图，所以边缘是逐像素抗锯齿的，不是硬边。
