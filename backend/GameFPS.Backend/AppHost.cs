@@ -187,6 +187,39 @@ public sealed class AppHost : IDisposable
         => _ipc?.Broadcast(JsonSerializer.Serialize(
                new { type = "candidates", data = _engine.GetCandidates() }, JsonOpts));
 
+    /// <summary>
+    /// 已导入的自选图片列表。游戏盒的做法是：选完自己的图片，它就变成预设网格里的
+    /// 一格，和内置预设并排，下次直接点。这里照做 —— 前端点「选择本地图片」时把图
+    /// 交给后端落盘，落盘后再把整个目录列回去，前端重新渲染网格。
+    /// </summary>
+    private void SendCrosshairImages()
+    {
+        var list = new List<object>();
+        try
+        {
+            string dir = AppPaths.CrosshairImageDir;
+            if (Directory.Exists(dir))
+            {
+                foreach (string path in Directory.GetFiles(dir))
+                {
+                    string ext = Path.GetExtension(path).ToLowerInvariant();
+                    if (ext != ".png" && ext != ".jpg" && ext != ".jpeg"
+                        && ext != ".gif" && ext != ".bmp") continue;
+
+                    list.Add(new
+                    {
+                        name = Path.GetFileName(path),
+                        path,
+                    });
+                }
+            }
+        }
+        catch { /* 目录读不了就当没有自选图 */ }
+
+        _ipc?.Broadcast(JsonSerializer.Serialize(
+            new { type = "crosshairImages", data = list }, JsonOpts));
+    }
+
     /// <summary>显示器列表，供准星页选择把准星放在哪块屏上。</summary>
     private void SendDisplays()
     {
@@ -254,12 +287,17 @@ public sealed class AppHost : IDisposable
                     SendSessions();
                     SendCandidates();
                     SendDisplays();
+                    SendCrosshairImages();
                     if (_last != null)
                         _ipc?.Broadcast(JsonSerializer.Serialize(new { type = "snapshot", data = _last }, JsonOpts));
                     break;
 
                 case "getDisplays":
                     SendDisplays();
+                    break;
+
+                case "getCrosshairImages":
+                    SendCrosshairImages();
                     break;
 
                 case "getCandidates":
@@ -514,6 +552,7 @@ public sealed class AppHost : IDisposable
             _crosshair?.Apply(_settings.Crosshair);
             _hold?.Apply(_settings.Crosshair);
             SendSettings();
+            SendCrosshairImages();
         }
         catch
         {

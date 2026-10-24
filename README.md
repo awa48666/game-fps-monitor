@@ -13,8 +13,8 @@
 不想编译的话，去 **[Releases](https://github.com/awa48666/game-fps-monitor/releases/latest)** 下载：
 
 ```
-GameFPS-v1.0.10-win-x64.zip    约 180 MB   （任何 Windows 直接解压）
-GameFPS-v1.0.10-win-x64.7z     约 117 MB   （体积更小，需 7-Zip 或 Win11）
+GameFPS-v1.0.11-win-x64.zip    约 180 MB   （任何 Windows 直接解压）
+GameFPS-v1.0.11-win-x64.7z     约 117 MB   （体积更小，需 7-Zip 或 Win11）
 ```
 
 解压后双击 `GameFPS.exe` 即可。**包内已内置 .NET 10 与 Electron，不需要额外安装任何运行时。**
@@ -38,6 +38,7 @@ WinForms 设计器、调试符号读取器、非中文卫星资源等），共�
 <details>
 <summary>版本历史</summary>
 
+- **v1.0.11** — 修「闪一下就没了」（准星重复 Dispose 缓存位图，GDI+ 报 `ArgumentException`）；CPU 频率改用 `CallNtPowerInformation` 实测（`Actual Frequency` 计数器在不少机器上恒为 0）；自选图片导入后并入预设网格，和内置预设并排、下次直接点
 - **v1.0.10** — 修三处「勾了却不显示」：样式2 大核/小核补上频率；SSCJ 预设图因单帧 16 KB 限制被截断而静默失败（改为按分片拼接）；准星显示一段时间后消失（加看门狗每秒重申置顶并补推位图，同时不再静默吞异常，新增 `crosshair.log`）。细线预设图缩放后 alpha 补偿，donk/s1mple/TShape 不再糊成一片
 - **v1.0.9** — 修「保存当前设置为准星预设」点了没反应（Electron 禁用 `window.prompt`，改成自绘对话框）；渲染方式合并为「程序绘制 / 图片绘制」两档，预设图与自选图放在同一面板
 - **v1.0.8** — 准星支持图片（7 张内置预设 + 自定义图片）、按住显示（按住开镜键才显示，可设延迟）、我的预设（保存/一键应用/删除）与恢复默认

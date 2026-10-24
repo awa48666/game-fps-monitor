@@ -273,10 +273,13 @@ public sealed class HardwareMonitor : IDisposable
     ///
     /// 占用率是准确实测值。频率只能推算，因为 Windows 拿不到单核实际频率：
     ///   · 每核的 Actual Frequency 计数器恒为 0；
-    ///   · CallNtPowerInformation 只报基频，不反映睿频；
+    ///   · 每核的 Actual Frequency 计数器实测多为 0，不能当数据源；
+    ///   · CallNtPowerInformation 报的是当前 P-State 频率（能反映睿频），
+    ///     但精度到 100MHz 台阶，适合看趋势；
     ///   · % Processor Performance 对 P-core / E-core 的基准频率不同
     ///     （i5-13500HX 是 P=2.5GHz、E=1.8GHz），统一基准会让小核偏高到 4.5GHz。
-    /// 这里对两组分别用各自的基准换算，再做指数移动平均压住采样噪声。
+    /// 优先用 CallNtPowerInformation 的实测值按核心分组求平均；读不到时才回落到
+    /// % Processor Performance × 各自基准的推算，再做指数移动平均压住采样噪声。
     /// 精度约 ±10%，只适合看趋势，不要当作精确测量。
     /// </summary>
     private void SampleCoreSplit()
@@ -285,6 +288,9 @@ public sealed class HardwareMonitor : IDisposable
 
         PCoreUsagePercent = Math.Round(Math.Clamp(AvgOf(_pLogical, _coreTime), 0, 100), 1);
         ECoreUsagePercent = Math.Round(Math.Clamp(AvgOf(_eLogical, _coreTime), 0, 100), 1);
+
+        // 首选：ACPI 实测的每核当前频率
+        if (SampleFrequencyFromApi()) return;
 
         if (_nominalMHz <= 0) return;
 
@@ -296,6 +302,51 @@ public sealed class HardwareMonitor : IDisposable
 
         if (ePerf > 0 && _eCoreBaseMHz > 0)
             ECoreFrequencyMHz = Smooth(ECoreFrequencyMHz, _eCoreBaseMHz * ePerf / 100.0);
+    }
+
+    /// <summary>
+    /// 用 CallNtPowerInformation 的实测频率按大/小核分组求平均。
+    /// 拿到有效值返回 true（调用方就不再做计数器推算）。
+    /// </summary>
+    private bool SampleFrequencyFromApi()
+    {
+        var mhz = CpuFrequencyApi.ReadCurrentMhz();
+        if (mhz.Length == 0) return false;
+
+        double pSum = 0;
+        int pCount = 0;
+        foreach (int lp in _pLogical)
+        {
+            if (lp < 0 || lp >= mhz.Length) continue;
+            uint v = mhz[lp];
+            if (v > 0) { pSum += v; pCount++; }
+        }
+
+        double eSum = 0;
+        int eCount = 0;
+        foreach (int lp in _eLogical)
+        {
+            if (lp < 0 || lp >= mhz.Length) continue;
+            uint v = mhz[lp];
+            if (v > 0) { eSum += v; eCount++; }
+        }
+
+        // 全核平均也顺手给 CPU 总频率用，省得它继续依赖 Actual Frequency 计数器
+        double allSum = 0;
+        int allCount = 0;
+        foreach (uint v in mhz)
+        {
+            if (v > 0) { allSum += v; allCount++; }
+        }
+        if (allCount > 0) CpuFrequencyMHz = Smooth(CpuFrequencyMHz, allSum / allCount);
+
+        bool gotP = pCount > 0;
+        bool gotE = eCount > 0;
+
+        if (gotP) PCoreFrequencyMHz = Smooth(PCoreFrequencyMHz, pSum / pCount);
+        if (gotE) ECoreFrequencyMHz = Smooth(ECoreFrequencyMHz, eSum / eCount);
+
+        return gotP || gotE;
     }
 
     /// <summary>指数移动平均：新值权重 0.25，约 4 个采样周期收敛。</summary>

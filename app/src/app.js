@@ -76,6 +76,9 @@ function dispatch(msg) {
     case 'displays':
       renderDisplays(msg.data);
       break;
+    case 'crosshairImages':
+      renderCxUserImages(Array.isArray(msg.data) ? msg.data : []);
+      break;
     case 'sessions':
       renderHistory(Array.isArray(msg.data) ? msg.data : []);
       break;
@@ -808,6 +811,12 @@ let cxPresetFile = null;
 let cxPreviewImage = null;
 let cxPreviewImageKey = null;
 
+/**
+ * 后端已落盘的自选图片（和内置预设一起排在网格里）。
+ * 游戏盒的做法：选完自己的图，它就变成预设网格里的一格，下次直接点。
+ */
+let cxUserImages = [];
+
 /** 由 init() 注入：把准星改动防抖后下发给后端。 */
 let cxPush = null;
 /** 由 init() 注入：立即下发（点选类操作，不等防抖）。 */
@@ -1040,6 +1049,17 @@ function basenameOf(p) {
 }
 
 /**
+ * 收到后端的自选图列表：更新网格。
+ * 自选图和内置预设并排 —— 这就是游戏盒的行为，选过的图下次直接点。
+ */
+function renderCxUserImages(list) {
+  cxUserImages = list
+    .map((it) => ({ name: it.name || basenameOf(it.path), path: it.path }))
+    .filter((it) => it.name);
+  renderCxPresetImages();
+}
+
+/**
  * 把 app/src 下的资源读成 dataURL。
  * 页面以 file:// 加载，渲染进程里 fetch 本地文件会被 Chromium 拒绝，
  * 所以优先走 preload 的 Node 桥；浏览器里直接打开时回落到相对 URL。
@@ -1072,16 +1092,21 @@ function renderCxRenderMode() {
   if (styleBox) styleBox.hidden = cxMode !== 'procedural';
 }
 
-/** 内置预设图缩略图网格。 */
+/** 内置预设 + 已导入的自选图，一起排成缩略图网格。 */
 function renderCxPresetImages() {
   const box = $('cx-preset-images');
   if (!box) return;
   box.innerHTML = '';
 
+  const activeName = cxMode === 'image'
+    ? (cxPresetFile || (cxImagePath ? basenameOf(cxImagePath) : null))
+    : null;
+
+  // 内置预设
   for (const p of CX_PRESET_IMAGES) {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = 'cx-preset-img' + (cxMode === 'image' && cxPresetFile === p.file ? ' active' : '');
+    btn.className = 'cx-preset-img' + (activeName === p.file ? ' active' : '');
     btn.title = p.name;
     const img = document.createElement('img');
     const thumbRel = `assets/crosshair-presets/${p.file}`;
@@ -1094,6 +1119,54 @@ function renderCxPresetImages() {
     btn.addEventListener('click', () => applyCxPresetImage(p.file));
     box.appendChild(btn);
   }
+
+  // 用户自己导入的图：和预设并排，一格一张
+  for (const u of cxUserImages) {
+    const name = u.name || basenameOf(u.path || '');
+    if (!name) continue;
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'cx-preset-img own' + (activeName === name ? ' active' : '');
+    btn.title = name;
+
+    const img = document.createElement('img');
+    img.alt = name;
+    // 自选图的字节在 localStorage 里有缓存；没缓存就先留空，等图片列表回推后补
+    const cached = localStorage.getItem(CX_IMG_CACHE_PREFIX + name);
+    if (cached) img.src = cached;
+    else {
+      img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">' +
+        '<rect width="64" height="64" fill="#2a2a2a"/></svg>');
+    }
+    btn.appendChild(img);
+
+    const label = document.createElement('span');
+    label.textContent = name;
+    btn.appendChild(label);
+    btn.addEventListener('click', () => applyCxUserImage(name));
+    box.appendChild(btn);
+  }
+}
+
+/** 应用一张已落盘的自选图（字节从 localStorage 缓存取，没有就重新要一次）。 */
+async function applyCxUserImage(name) {
+  cxMode = 'image';
+  cxPresetFile = name;
+  renderCxRenderMode();
+  renderCxPresetImages();
+
+  const nameEl = $('cx-image-name');
+  if (nameEl) nameEl.textContent = name;
+
+  const cached = localStorage.getItem(CX_IMG_CACHE_PREFIX + name);
+  if (cached) {
+    send({ type: 'setCrosshairImage', data: { name, dataUrl: cached } });
+    await refreshCxPreviewImage(name);
+    drawCrosshairPreview();
+  }
+  // 没缓存说明是本机已落盘但界面还没见过这张图，后端会按现有路径直接应用
 }
 
 /** 选中内置预设图：把图片字节发给后端落盘，后端随即把路径写进设置。 */
@@ -1132,9 +1205,9 @@ function pickCxImage(file) {
   const reader = new FileReader();
   reader.onload = async () => {
     cxMode = 'image';
-    cxPresetFile = null;
+    // 选自己的图 = 选中网格里「这一格」，文件名就是这一格的标识
+    cxPresetFile = basenameOf(file.name);
     renderCxRenderMode();
-    renderCxPresetImages();
     const nameEl = $('cx-image-name');
     if (nameEl) nameEl.textContent = file.name;
     await sendCxImage(file.name, String(reader.result));
@@ -1151,6 +1224,13 @@ async function sendCxImage(name, dataUrl) {
   send({ type: 'setCrosshairImage', data: { name, dataUrl } });
   await refreshCxPreviewImage(name);
   drawCrosshairPreview();
+  // 后端落盘后会回推 crosshairImages；这里先乐观插进网格，
+  // 免得用户选完图要等一个来回才在预设里看到它
+  const bare = basenameOf(name);
+  if (bare && !cxUserImages.some((u) => u.name === bare)) {
+    cxUserImages.push({ name: bare, path: null });
+    renderCxPresetImages();
+  }
 }
 
 /** 按文件名缓存图片 dataURL，供预览与重启后复用。 */
@@ -2087,6 +2167,7 @@ function init() {
       if (btn.dataset.page === 'crosshair') {
         // 画布在隐藏页里量出来的尺寸是 0，显示后必须重画一次
         send({ type: 'getDisplays' });
+        send({ type: 'getCrosshairImages' });
         drawCrosshairPreview();
       }
     });

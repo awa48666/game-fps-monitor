@@ -480,9 +480,18 @@ public sealed class CrosshairForm : Form
             attrs.SetColorMatrix(cm, ColorMatrixFlag.Default, ColorAdjustType.Bitmap);
         }
 
-        using var source = PrepareSource(img, draw);
-        g.DrawImage(source, new Rectangle(x, y, draw, draw),
-            0, 0, source.Width, source.Height, GraphicsUnit.Pixel, attrs);
+        // PrepareSource 可能原样返回缓存中的 _image（图比目标尺寸小时），
+        // 所以这里只释放它真正新建的那份，绝不 Dispose 缓存的源图。
+        var source = PrepareSource(img, draw);
+        try
+        {
+            g.DrawImage(source, new Rectangle(x, y, draw, draw),
+                0, 0, source.Width, source.Height, GraphicsUnit.Pixel, attrs);
+        }
+        finally
+        {
+            if (!ReferenceEquals(source, img)) source.Dispose();
+        }
 
         return bmp;
     }
@@ -509,8 +518,12 @@ public sealed class CrosshairForm : Form
             g.DrawImage(img, new Rectangle(0, 0, target, target), 0, 0, w, h, GraphicsUnit.Pixel);
         }
 
-        // 统一成 32bppArgb 后再逐像素补 alpha（源图可能是 24bpp 或带调色板）
-        using var src = ToBitmap(img);
+        // 统一成 32bppArgb 后再逐像素补 alpha（源图可能是 24bpp 或带调色板）。
+        // 注意：ToBitmap 在源图本来就是 32bppArgb 时直接返回原对象（零拷贝），
+        // 那可能是 LoadImage 缓存着的 _image。用 using 会把调用方的缓存图释放掉，
+        // 下次渲染拿到的就是已释放对象 —— GDI+ 报 "ArgumentException: Parameter is
+        // not valid."，表现为准星闪一下之后再也不出现。所以只释放自己拷贝的那份。
+        var src = ToBitmap(img);
         try
         {
             BoostAlpha(scaled, src);
@@ -518,6 +531,10 @@ public sealed class CrosshairForm : Form
         catch
         {
             // 补偿失败就用未补偿的缩放结果，至少还能画出东西
+        }
+        finally
+        {
+            if (!ReferenceEquals(src, img)) src.Dispose();
         }
 
         return scaled;
