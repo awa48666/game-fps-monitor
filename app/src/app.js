@@ -8,6 +8,8 @@ let ws = null;
 let reconnectTimer = null;
 let latest = null;
 let settings = null;
+/** 上一次发给主进程的关闭策略，避免每条设置广播都重复发一次 IPC。 */
+let lastClosePolicy = null;
 
 /** 用户是否正在设置页的某个输入控件上操作（热更新时用来抑制回填）。 */
 /** 同步由后端拍板的布尔开关（开机自启 / 关闭行为）。 */
@@ -22,9 +24,15 @@ function syncAuthoritativeSwitches(s) {
     if (close.checked !== want) close.checked = want;
   }
 
-  // 顺带给主进程也同步一次：托盘菜单改过关闭行为时，这里能兜住
-  if (window.gamefps && window.gamefps.setClosePolicy) {
-    window.gamefps.setClosePolicy(s.minimizeOnClose === false ? 'quit' : 'minimize');
+  // 顺带给主进程也同步一次：托盘菜单改过关闭行为时，这里能兜住。
+  // 只在真的变了时才发 —— 后端每次回推设置都会走到这里，
+  // 无条件发等于让每一条设置广播都多一次 IPC。
+  const policy = s.minimizeOnClose === false ? 'quit' : 'minimize';
+  if (policy !== lastClosePolicy) {
+    lastClosePolicy = policy;
+    if (window.gamefps && window.gamefps.setClosePolicy) {
+      window.gamefps.setClosePolicy(policy);
+    }
   }
 }
 
@@ -2579,6 +2587,16 @@ function init() {
       } else if (window.gamefps.forceQuit) {
         window.gamefps.forceQuit();
       }
+    });
+  }
+
+  // 窗口被托盘重新唤起时补拉一次设置。
+  // 界面是被 hide() 藏起来的而不是销毁，隐藏期间后端可能被托盘菜单改动过
+  // （比如在托盘里取消开机自启），不重新拉一次就会看到过期状态。
+  if (window.gamefps && window.gamefps.onShown) {
+    window.gamefps.onShown(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) send({ type: 'hello' });
+      else connect();
     });
   }
 
