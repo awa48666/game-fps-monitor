@@ -25,8 +25,8 @@
 不想编译的话，去 **[Releases](https://github.com/awa48666/game-fps-monitor/releases/latest)** 下载：
 
 ```
-GameFPS-v1.0.13-win-x64.zip    约 180 MB   （任何 Windows 直接解压）
-GameFPS-v1.0.13-win-x64.7z     约 117 MB   （体积更小，需 7-Zip 或 Win11）
+GameFPS-v1.0.14-win-x64.zip    约 180 MB   （任何 Windows 直接解压）
+GameFPS-v1.0.14-win-x64.7z     约 117 MB   （体积更小，需 7-Zip 或 Win11）
 ```
 
 解压后双击 `GameFPS.exe` 即可。**包内已内置 .NET 10 与 Electron，不需要额外安装任何运行时。**
@@ -50,6 +50,7 @@ WinForms 设计器、调试符号读取器、非中文卫星资源等），共�
 <details>
 <summary>版本历史</summary>
 
+- **v1.0.14** — 修「显示项」的拖动排序对样式2（横排单行）不生效：三套样式现在统一走同一套排序；顺带修横排下显存必须同时勾选温度才显示的毛病
 - **v1.0.13** — 设置页新增「使用预设样式」开关：打开用「样式」下拉的固定版式，关闭改用网格布局编辑器排出的自由版式（网格为空时自动退回预设样式，不会让悬浮窗消失）
 - **v1.0.12** — README 补齐准星来源说明（参考 [NexBox](https://github.com/MuLiuSaMa/NexBox)，7 张预设图取自该项目）；首页注明本项目完全由 Vibe Coding 写成
 - **v1.0.11** — 修「闪一下就没了」（准星重复 Dispose 缓存位图，GDI+ 报 `ArgumentException`）；CPU 频率改用 `CallNtPowerInformation` 实测（`Actual Frequency` 计数器在不少机器上恒为 0）；自选图片导入后并入预设网格，和内置预设并排、下次直接点
