@@ -113,10 +113,24 @@ if [ "$TO_SHARE" = 1 ]; then
     cp -r "$OUT_DIR" "$STAGE"
 
     # hgfs 上如果宿主正开着 GameFPS.exe，旧目录里的文件是锁住的，rm 会 EPERM。
-    # 这种情况下改落到带版本号的目录，保证这一次的包一样能双击运行。
-    if rm -rf "$SHARE_DIR/GameFPS" 2>/dev/null && mv "$STAGE" "$SHARE_DIR/GameFPS" 2>/dev/null; then
-        TARGET="$SHARE_DIR/GameFPS"
-        say "synced: $TARGET/GameFPS.exe ($(du -sm "$TARGET" | cut -f1) MB)"
+    # 注意不能直接 rm -rf 旧目录再判断成败 —— 那样会把它删到一半才失败，
+    # 留下一个半新半旧、既跑不起来也覆盖不了的目录（v1.0.9 就是这么坏的）。
+    # 所以先用 rename 探路：rename 是原子的，要么整个目录让开，要么完全不动。
+    OLD="$SHARE_DIR/.GameFPS.old"
+    rm -rf "$OLD" 2>/dev/null || true
+
+    if mv "$SHARE_DIR/GameFPS" "$OLD" 2>/dev/null; then
+        if mv "$STAGE" "$SHARE_DIR/GameFPS" 2>/dev/null; then
+            TARGET="$SHARE_DIR/GameFPS"
+            # 旧目录能删就删；删不掉说明宿主还占着它，留着也不影响新目录
+            rm -rf "$OLD" 2>/dev/null || say "旧目录删不掉（宿主机还占着），留在 $OLD"
+            say "synced: $TARGET/GameFPS.exe ($(du -sm "$TARGET" | cut -f1) MB)"
+        else
+            # 换了名却放不进新目录，把旧的放回去，别让用户没有可运行的程序
+            mv "$OLD" "$SHARE_DIR/GameFPS" 2>/dev/null || true
+            echo "sync failed: cannot replace $SHARE_DIR/GameFPS" >&2
+            exit 1
+        fi
     else
         TARGET="$SHARE_DIR/GameFPS-$VERSION"
         rm -rf "$TARGET" 2>/dev/null || true
