@@ -52,6 +52,15 @@ const initialPage = pageArg ? pageArg.split('=')[1] : '';
 
 let mainWindow = null;
 
+// 点关闭按钮时的行为：'minimize' = 收进托盘继续后台跑，'quit' = 退出整个程序。
+// 默认最小化 —— 这是个帧率监测工具，用户关界面通常只是想去玩游戏了，
+// 直接退出会让采集和悬浮窗一起消失，那才是意外。
+let closePolicy = 'minimize';
+
+// 是否允许窗口真正关闭。退出流程里先把它置 true，再调 win.close()，
+// 否则 close 事件里的 preventDefault 会把退出也拦下来。
+let allowClose = false;
+
 function createWindow() {
   log('createWindow: 创建窗口');
   mainWindow = new BrowserWindow({
@@ -73,6 +82,29 @@ function createWindow() {
   mainWindow.once('ready-to-show', () => {
     log('ready-to-show: 显示窗口');
     mainWindow.show();
+  });
+
+  // 关闭按钮：按策略决定是收进托盘还是真退出
+  mainWindow.on('close', (e) => {
+    if (allowClose) return;          // 退出流程已放行
+    if (closePolicy === 'minimize') {
+      e.preventDefault();
+      log('close: 按策略最小化到托盘');
+      mainWindow.hide();
+      return;
+    }
+    // 'quit'：交给渲染进程经 WebSocket 通知 C# 后端一起退出
+    e.preventDefault();
+    log('close: 按策略退出整个程序');
+    mainWindow.webContents.send('request-quit');
+    // 兜底：WS 断开时渲染进程可能收不到，2 秒后强制退出
+    setTimeout(() => {
+      if (!allowClose) {
+        log('close: 2 秒内未收到退出确认，强制退出');
+        allowClose = true;
+        app.quit();
+      }
+    }, 2000);
   });
 
   mainWindow.webContents.on('did-fail-load', (_e, code, desc, url) => {
@@ -100,6 +132,21 @@ ipcMain.on('focus-window', () => {
   if (mainWindow.isMinimized()) mainWindow.restore();
   mainWindow.show();
   mainWindow.focus();
+  mainWindow.webContents.send('window-shown');
+});
+
+// 渲染进程收到设置后调这里，把「关闭行为」同步给主进程。
+// 这样改完设置立刻生效，不需要重启界面。
+ipcMain.on('set-close-policy', (_e, mode) => {
+  closePolicy = mode === 'quit' ? 'quit' : 'minimize';
+  log('closePolicy -> ' + closePolicy);
+});
+
+// 渲染进程确认可以退出了（它已经通知过后端，或 WS 本来就断着）
+ipcMain.on('force-quit', () => {
+  log('收到 force-quit');
+  allowClose = true;
+  app.quit();
 });
 
 // preload 在渲染进程里拿不到主进程的 --ws-port，用同步 IPC 提供
@@ -118,5 +165,7 @@ app.on('activate', () => {
 
 app.on('window-all-closed', () => {
   log('window-all-closed');
-  if (process.platform !== 'darwin') app.quit();
+  // 只有退出流程里才真的退（allowClose），否则窗口关了但后端还在跑，
+  // 直接 app.quit() 会让托盘图标和采集一起消失，与"最小化"策略相悖。
+  if (allowClose && process.platform !== 'darwin') app.quit();
 });

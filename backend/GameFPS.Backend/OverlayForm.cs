@@ -272,9 +272,26 @@ public sealed class OverlayForm : Form
     /// <summary>是否双列布局（样式3）。</summary>
     private bool IsTwoColumn => _settings.OverlayStyle == 3;
 
-    /// <summary>是否使用用户自定义的自由网格布局。</summary>
+    /// <summary>
+    /// 「使用预设样式」开关的实际取值。
+    /// 设置里的字段是可空的：老配置（v1.0.3 起网格就是"有块就用"）里没有这一项，
+    /// 反序列化后是 null，表示用户没表过态 —— 这时按老行为推导，
+    /// 有网格块就走网格，没网格块就走预设样式，升级后版式不会突然变样。
+    /// </summary>
+    private bool UsePresetStyleResolved =>
+        _settings.UsePresetStyle
+        ?? !(_settings.OverlayBlocks != null && _settings.OverlayBlocks.Count > 0);
+
+    /// <summary>
+    /// 是否使用用户自定义的自由网格布局。
+    /// 由设置页的「使用预设样式」开关决定：开关打开走预设样式（样式1/2/3），
+    /// 关闭才走网格。网格为空时无论开关如何都退回预设样式，
+    /// 否则关掉开关会让悬浮窗变空、看起来像"消失"。
+    /// </summary>
     private bool UseGridLayout =>
-        _settings.OverlayBlocks != null && _settings.OverlayBlocks.Count > 0;
+        !UsePresetStyleResolved
+        && _settings.OverlayBlocks != null
+        && _settings.OverlayBlocks.Count > 0;
 
     /// <summary>
     /// 按块类型取显示内容。返回 (label, value)；
@@ -335,36 +352,57 @@ public sealed class OverlayForm : Form
     /// <summary>样式2：所有数值压成一行横排，最省屏幕空间。</summary>
     private List<Row> BuildRowsHorizontal(MonitorSnapshot s)
     {
-        var parts = new List<string>();
+        // 每个显示项先各自成一行（带 Key），排完序再拼成一行。
+        // 以前这里是「按固定顺序直接往 parts 里塞字符串」，结果「显示项」里的
+        // 拖动排序对样式2 完全不生效，只有样式1/样式3 认那套顺序。
+        var items = new List<Row>();
 
         if (_settings.ShowGameName && !string.IsNullOrEmpty(s.GameName))
-            parts.Add(s.GameName);
+            items.Add(new Row("", s.GameName, true, "gamename"));
 
-        if (_settings.ShowFps) parts.Add("FPS " + Fps(s.Fps));
-        if (_settings.ShowFrameTime) parts.Add("帧时间 " + s.AvgFrameTimeMs.ToString("0.00") + "ms");
-        if (_settings.ShowLow1) parts.Add("1% Low " + Fps(s.Low1PercentFps));
-        if (_settings.ShowLow01) parts.Add("0.1% Low " + Fps(s.Low01PercentFps));
-        if (_settings.ShowCpu) parts.Add("CPU " + BuildCpuText(s));
-        // 大小核：占用率必给，频率有就带上。这里以前只拼占用率，
-        // 勾选「大核/小核」后横排样式永远看不到频率，和竖排样式不一致。
+        if (_settings.ShowFps) items.Add(new Row("", "FPS " + Fps(s.Fps), false, "fps"));
+        if (_settings.ShowFrameTime) items.Add(new Row("", "帧时间 " + s.AvgFrameTimeMs.ToString("0.00") + "ms", false, "frametime"));
+        if (_settings.ShowLow1) items.Add(new Row("", "1% Low " + Fps(s.Low1PercentFps), false, "low1"));
+        if (_settings.ShowLow01) items.Add(new Row("", "0.1% Low " + Fps(s.Low01PercentFps), false, "low01"));
+        if (_settings.ShowCpu) items.Add(new Row("", "CPU " + BuildCpuText(s), false, "cpu"));
+
+        // 大小核：占用率必给，频率有就带上。
         if (_settings.ShowPCore && s.HasHeterogeneousCores
             && (s.PCoreUsagePercent > 0 || s.PCoreFrequencyMHz > 0))
         {
             string p = "大核 " + s.PCoreUsagePercent.ToString("0") + "%";
             if (s.PCoreFrequencyMHz > 0) p += $" {s.PCoreFrequencyMHz / 1000.0:0.00}G";
-            parts.Add(p);
+            items.Add(new Row("", p, false, "pcore"));
         }
         if (_settings.ShowECore && s.HasHeterogeneousCores
             && (s.ECoreUsagePercent > 0 || s.ECoreFrequencyMHz > 0))
         {
             string e = "小核 " + s.ECoreUsagePercent.ToString("0") + "%";
             if (s.ECoreFrequencyMHz > 0) e += $" {s.ECoreFrequencyMHz / 1000.0:0.00}G";
-            parts.Add(e);
+            items.Add(new Row("", e, false, "ecore"));
         }
-        if (_settings.ShowGpu) parts.Add("GPU " + BuildGpuText(s));
-        if (_settings.ShowGpuMemory && _settings.ShowVramTemperature && s.HasGpuMemoryTemperature)
-            parts.Add("显存 " + s.GpuMemoryTemperatureC.ToString("0") + "°C");
-        if (_settings.ShowMemory) parts.Add("内存 " + s.MemoryUsagePercent.ToString("0") + "%");
+
+        if (_settings.ShowGpu) items.Add(new Row("", "GPU " + BuildGpuText(s), false, "gpu"));
+        // 显存：占用率主体照常显示，温度是附加信息。
+        // 原条件要求「显存温度开关打开 + 硬件支持」才显示整块，导致勾了显存
+        // 却没勾温度时，横排里连显存大小都看不到 —— 与竖排样式不一致。
+        if (_settings.ShowGpuMemory)
+        {
+            string vram = "显存 " + s.GpuMemoryMB.ToString("0") + " MB";
+            if (_settings.ShowVramTemperature && s.HasGpuMemoryTemperature && s.GpuMemoryTemperatureC > 0)
+                vram += $"  {s.GpuMemoryTemperatureC:0}°C";
+            items.Add(new Row("", vram, false, "vram"));
+        }
+        if (_settings.ShowMemory) items.Add(new Row("", "内存 " + s.MemoryUsagePercent.ToString("0") + "%", false, "memory"));
+
+        // 走和竖排完全相同的排序规则，三套样式对「显示项」顺序的理解保持一致
+        var ordered = ApplyCustomOrder(items);
+
+        var parts = new List<string>(ordered.Count);
+        foreach (var r in ordered)
+        {
+            if (!string.IsNullOrEmpty(r.Value)) parts.Add(r.Value);
+        }
 
         var rows = new List<Row>();
         if (parts.Count > 0) rows.Add(new Row("", string.Join("   ", parts), false, "hline"));

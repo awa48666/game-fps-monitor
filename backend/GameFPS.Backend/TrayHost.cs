@@ -10,12 +10,15 @@ public sealed class TrayHost : IDisposable
 {
     private readonly NotifyIcon _icon;
     private readonly ToolStripMenuItem _overlayItem;
+    private readonly ToolStripMenuItem _autoStartItem;
 
     public event Action? OpenMainRequested;
     public event Action? ToggleOverlayRequested;
+    /// <summary>用户勾选/取消托盘菜单里的「开机自启」。参数是勾选后的目标状态。</summary>
+    public event Action<bool>? AutoStartToggleRequested;
     public event Action? ExitRequested;
 
-    public TrayHost(bool overlayChecked)
+    public TrayHost(bool overlayChecked, bool autoStartChecked)
     {
         var menu = new ContextMenuStrip();
 
@@ -29,11 +32,21 @@ public sealed class TrayHost : IDisposable
         };
         _overlayItem.Click += (_, _) => ToggleOverlayRequested?.Invoke();
 
+        // 开机自启：CheckOnClick 让它自己翻状态，但我们不直接信任它 ——
+        // 写注册表可能失败，最后以 SetAutoStartChecked 回推的值为准。
+        _autoStartItem = new ToolStripMenuItem("开机自启")
+        {
+            Checked = autoStartChecked,
+            CheckOnClick = true,
+        };
+        _autoStartItem.Click += (_, _) => AutoStartToggleRequested?.Invoke(_autoStartItem.Checked);
+
         var exitItem = new ToolStripMenuItem("退出");
         exitItem.Click += (_, _) => ExitRequested?.Invoke();
 
         menu.Items.Add(openItem);
         menu.Items.Add(_overlayItem);
+        menu.Items.Add(_autoStartItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(exitItem);
 
@@ -56,6 +69,15 @@ public sealed class TrayHost : IDisposable
     public void SetOverlayChecked(bool value)
     {
         if (_overlayItem.Checked != value) _overlayItem.Checked = value;
+    }
+
+    /// <summary>
+    /// 回推开机自启的真实状态。写注册表失败时用它把菜单勾选弹回来，
+    /// 免得界面显示已开启、实际没写进去。
+    /// </summary>
+    public void SetAutoStartChecked(bool value)
+    {
+        if (_autoStartItem.Checked != value) _autoStartItem.Checked = value;
     }
 
     public void ShowBalloon(string title, string text)

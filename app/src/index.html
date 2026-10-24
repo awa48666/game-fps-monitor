@@ -373,15 +373,23 @@
         <button id="btn-drag-overlay" class="mini">调整位置</button>
       </div>
       <label class="row toggle">
+        <input type="checkbox" id="s-usePresetStyle">
+        <span>使用预设样式</span>
+      </label>
+      <p class="muted small" id="preset-style-hint">
+        打开时用上面的「样式」选项排版；关闭时改用下面的网格布局编辑器排出来的版式。
+      </p>
+      <label class="row toggle">
         <input type="checkbox" id="s-autoShowOnGame">
         <span>仅在检测到游戏时显示</span>
       </label>
       <p class="muted small" id="drag-hint">点「调整位置」后，直接拖动屏幕上的悬浮窗到想要的地方，拖完再点一次结束。</p>
 
       <h4>网格布局编辑器</h4>
-      <p class="muted small" style="margin:-4px 0 8px">
+      <p class="muted small" style="margin:-4px 0 8px" id="grid-editor-hint">
         把下面的数据块拖进虚线框即可放置；点已放置的块可以移除。
         放好一格后，右侧和下方会自动补出新的虚线框。
+        <strong>只有关闭「使用预设样式」时，这里排出的版式才会生效。</strong>
       </p>
 
       <div class="block-pool" id="block-pool"></div>
@@ -536,6 +544,26 @@
         <span class="muted small">条</span>
       </label>
       <p class="muted small">改完点下面的「保存设置」生效。</p>
+    </div>
+
+    <div class="card">
+      <h3>启动与关闭</h3>
+      <label class="row toggle">
+        <input type="checkbox" id="s-minimizeOnClose" checked>
+        <span>点关闭按钮时最小化到托盘</span>
+      </label>
+      <p class="muted small" style="margin:-4px 0 8px">
+        勾上：关掉界面只是收进托盘，采集和悬浮窗继续在后台跑，点托盘图标可以再打开。
+        不勾：关掉界面就退出整个程序（等同于托盘菜单的「退出」）。
+      </p>
+      <label class="row toggle">
+        <input type="checkbox" id="s-autoStart">
+        <span>开机自启</span>
+      </label>
+      <p class="muted small" style="margin:-4px 0 0">
+        写当前用户的注册表启动项（<code>HKCU\Software\Microsoft\Windows\CurrentVersion\Run</code>），
+        不需要额外权限，也不会弹 UAC。托盘右键菜单里也有同一个开关，两边状态同步。
+      </p>
     </div>
 
     <div class="actions">

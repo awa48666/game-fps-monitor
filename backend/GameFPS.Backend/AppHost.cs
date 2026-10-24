@@ -30,6 +30,9 @@ public sealed class AppHost : IDisposable
     private TrayHost? _tray;
     private HotkeyWindow? _hotkeys;
     private Process? _electron;
+
+    /// <summary>开机自启最后已知的真实状态（以注册表为准），用于避免高频路径重复访问注册表。</summary>
+    private bool _autoStartKnown;
     private MonitorSnapshot? _last;
     private SessionRecorder? _recorder;
 
@@ -122,9 +125,20 @@ public sealed class AppHost : IDisposable
 
         try
         {
-            _tray = new TrayHost(_settings.OverlayEnabled);
+            // 开机自启以注册表实际状态为准，不信设置文件 ——
+            // 用户可能在别处（任务管理器启动项）关掉过它
+            bool autoStart = AutoStartManager.IsEnabled();
+            _autoStartKnown = autoStart;
+            if (_settings.AutoStart != autoStart)
+            {
+                _settings.AutoStart = autoStart;
+                _settings.Save();
+            }
+
+            _tray = new TrayHost(_settings.OverlayEnabled, autoStart);
             _tray.OpenMainRequested += OpenMainUi;
             _tray.ToggleOverlayRequested += ToggleOverlay;
+            _tray.AutoStartToggleRequested += ApplyAutoStart;
             _tray.ExitRequested += () => Application.ExitThread();
         }
         catch (Exception ex)
@@ -467,6 +481,30 @@ public sealed class AppHost : IDisposable
 
     private void ApplySettings(OverlaySettings settings)
     {
+        // 开机自启只在值真的变了时才动注册表。
+        // 这里是高频路径（拖滑块每次都会进来），不能每次都去读注册表。
+        if (settings.AutoStart != _autoStartKnown)
+        {
+            bool registryNow = AutoStartManager.IsEnabled();
+            if (registryNow == settings.AutoStart)
+            {
+                // 注册表已经是目标状态（比如用户刚在托盘里改过），不用重写
+                _autoStartKnown = registryNow;
+            }
+            else if (AutoStartManager.SetEnabled(settings.AutoStart))
+            {
+                _autoStartKnown = settings.AutoStart;
+            }
+            else
+            {
+                // 写失败（组策略限制等）：退回注册表实况，让界面开关弹回去
+                settings.AutoStart = registryNow;
+                _autoStartKnown = registryNow;
+                _tray?.ShowBalloon("开机自启设置失败", "写入注册表启动项被拒绝。");
+            }
+            _tray?.SetAutoStartChecked(_autoStartKnown);
+        }
+
         _settings = settings;
         _settings.Crosshair ??= new CrosshairSettings();   // 老配置或前端漏传时补齐
         _settings.Save();
@@ -485,6 +523,28 @@ public sealed class AppHost : IDisposable
     /// 应用进程优先级。RealTime 不开放 —— 那会把鼠标键盘的输入线程都挤掉，
     /// 表现为系统卡顿。这里只接受 Normal / AboveNormal / High。
     /// </summary>
+    /// <summary>
+    /// 应用开机自启设置。托盘菜单和设置页两个入口都走这里，
+    /// 以写注册表的实际结果为准回推两处状态 —— 失败时开关会被弹回去，
+    /// 而不是留下一句「看起来开了、其实没写进去」。
+    /// </summary>
+    private void ApplyAutoStart(bool enabled)
+    {
+        bool ok = AutoStartManager.SetEnabled(enabled);
+
+        _autoStartKnown = ok;
+        _settings.AutoStart = ok;
+        if (!ok)
+        {
+            // 写失败（组策略限制、注册表只读等）时把菜单勾选弹回去
+            _tray?.SetAutoStartChecked(AutoStartManager.IsEnabled());
+        }
+        _settings.Save();
+
+        if (!ok) _tray?.ShowBalloon("开机自启设置失败", "写入注册表启动项被拒绝。");
+        SendSettings();
+    }
+
     private void ApplyPriority()
     {
         try

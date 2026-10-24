@@ -10,6 +10,24 @@ let latest = null;
 let settings = null;
 
 /** 用户是否正在设置页的某个输入控件上操作（热更新时用来抑制回填）。 */
+/** 同步由后端拍板的布尔开关（开机自启 / 关闭行为）。 */
+function syncAuthoritativeSwitches(s) {
+  if (!s) return;
+  const auto = $('s-autoStart');
+  if (auto && auto.checked !== !!s.autoStart) auto.checked = !!s.autoStart;
+
+  const close = $('s-minimizeOnClose');
+  if (close) {
+    const want = s.minimizeOnClose !== false;
+    if (close.checked !== want) close.checked = want;
+  }
+
+  // 顺带给主进程也同步一次：托盘菜单改过关闭行为时，这里能兜住
+  if (window.gamefps && window.gamefps.setClosePolicy) {
+    window.gamefps.setClosePolicy(s.minimizeOnClose === false ? 'quit' : 'minimize');
+  }
+}
+
 function isEditingForm() {
   const el = document.activeElement;
   // cx- 是准星页的控件；同样不能在拖动时被打断
@@ -72,6 +90,10 @@ function dispatch(msg) {
       // 热更新模式下后端会把自己的改动广播回来；此时若用户正在某个输入框里打字，
       // 回填会打断输入（光标跳走、滑块回弹），所以有焦点时不回填。
       if (!isEditingForm()) fillSettings(settings);
+      // 这两个是"后端说了算"的开关：开机自启可能因注册表写入失败被后端弹回，
+      // 关闭行为也可能被托盘改过。它们都不是输入框，回填不会打断打字，
+      // 所以即便正在编辑其它字段也要同步，否则界面会显示成用户以为的状态。
+      syncAuthoritativeSwitches(settings);
       break;
     case 'displays':
       renderDisplays(msg.data);
@@ -1647,7 +1669,10 @@ function drawCrosshairPreview() {
 
 const FIELDS = [
   ['overlayEnabled', 'checkbox'],
+  ['usePresetStyle', 'checkbox'],
   ['overlayStyle', 'number'],
+  ['minimizeOnClose', 'checkbox'],
+  ['autoStart', 'checkbox'],
   ['autoShowOnGame', 'checkbox'],
   ['showGameName', 'checkbox'],
   ['showFps', 'checkbox'],
@@ -1730,6 +1755,15 @@ function fillSettings(s) {
     const el = $('s-' + key);
     if (!el) continue;
     const v = s[key];
+    // usePresetStyle 是可空字段：老配置里没有它，后端反序列化后为 null，
+    // 语义是"没表过态，按老行为推导"。老行为是"有网格块就用网格"，
+    // 所以这里要显示推导结果而不是 false（否则老用户一升级就看到开关是关的，
+    // 悬浮窗却还是网格版式，两边对不上）。
+    if (key === 'usePresetStyle') {
+      const hasBlocks = Array.isArray(s.overlayBlocks) && s.overlayBlocks.length > 0;
+      el.checked = v === null || v === undefined ? !hasBlocks : !!v;
+      continue;
+    }
     if (kind === 'checkbox') el.checked = !!v;
     else el.value = v === undefined || v === null ? '' : v;
   }
@@ -1746,6 +1780,8 @@ function fillSettings(s) {
     rows: Math.max(1, Number(s.gridRows) || 3),
     cols: Math.max(1, Number(s.gridCols) || 1),
   };
+  // 设置回推时不重绘网格（怕打断拖拽），但状态提示必须跟上
+  refreshGridHint();
 
   // 主题选择器反映当前配色
   const themeSel = $('s-colorTheme');
@@ -2119,12 +2155,28 @@ function renderGridEditor(onChange) {
     }
   }
 
+  refreshGridHint();
+}
+
+/**
+ * 刷新网格编辑器下方那行状态提示。
+ * 单独抽出来是因为它不只依赖网格内容，还依赖「使用预设样式」开关 ——
+ * 开关一变就得刷新，而那时不需要重绘整个网格。
+ */
+function refreshGridHint() {
   const hint = $('grid-hint');
-  if (hint) {
-    hint.textContent = gridState.blocks.length
-      ? `已放置 ${gridState.blocks.length} 个块 · 网格 ${gridState.rows}×${gridState.cols}`
-      : '网格为空时悬浮窗会使用「样式」下拉里的固定布局';
-  }
+  if (!hint) return;
+
+  const count = gridState.blocks.length;
+  const base = count
+    ? `已放置 ${count} 个块 · 网格 ${gridState.rows}×${gridState.cols}`
+    : '网格为空时悬浮窗会使用「样式」下拉里的固定布局';
+
+  // 开着预设样式时网格不生效，这点必须写在提示里，否则用户排了半天看不到变化
+  const presetOn = $('s-usePresetStyle') ? $('s-usePresetStyle').checked : true;
+  hint.textContent = presetOn && count
+    ? `${base} · 当前未生效（已开启「使用预设样式」）`
+    : base;
 }
 
 /* ===================== 主界面主题 ===================== */
@@ -2220,6 +2272,8 @@ function init() {
     if (!el) continue;
     el.addEventListener('input', () => {
       if (kind === 'range') syncRangeLabels();
+      // 开关一变，网格提示里的「未生效」字样要跟着变
+      if (key === 'usePresetStyle') refreshGridHint();
       // 滑块/颜色拖动用防抖，勾选框和数字框立即生效
       pushSettings(kind === 'checkbox');
     });
@@ -2510,6 +2564,22 @@ function init() {
   if (hash) {
     const target = document.querySelector(`.tab[data-page="${hash}"]`);
     if (target) target.click();
+  }
+
+  // 主进程在「关闭窗口 = 退出程序」策略下会发 request-quit，
+  // 由前端经 WebSocket 通知 C# 后端一起退出 —— 后端才是常驻进程，
+  // 它退了会把 Electron 整棵进程树收掉。WS 断着就直接让主进程退出。
+  if (window.gamefps && window.gamefps.onQuitRequested) {
+    window.gamefps.onQuitRequested(() => {
+      const connected = ws && ws.readyState === WebSocket.OPEN;
+      if (connected) {
+        send({ type: 'quit' });
+        // 后端收到 quit 会走正常退出流程并收掉 Electron；这里不再重复退出，
+        // 万一它没响应，主进程自己的 2 秒兜底会接管。
+      } else if (window.gamefps.forceQuit) {
+        window.gamefps.forceQuit();
+      }
+    });
   }
 
   connect();
