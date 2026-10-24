@@ -1647,6 +1647,7 @@ function drawCrosshairPreview() {
 
 const FIELDS = [
   ['overlayEnabled', 'checkbox'],
+  ['usePresetStyle', 'checkbox'],
   ['overlayStyle', 'number'],
   ['autoShowOnGame', 'checkbox'],
   ['showGameName', 'checkbox'],
@@ -1730,6 +1731,15 @@ function fillSettings(s) {
     const el = $('s-' + key);
     if (!el) continue;
     const v = s[key];
+    // usePresetStyle 是可空字段：老配置里没有它，后端反序列化后为 null，
+    // 语义是"没表过态，按老行为推导"。老行为是"有网格块就用网格"，
+    // 所以这里要显示推导结果而不是 false（否则老用户一升级就看到开关是关的，
+    // 悬浮窗却还是网格版式，两边对不上）。
+    if (key === 'usePresetStyle') {
+      const hasBlocks = Array.isArray(s.overlayBlocks) && s.overlayBlocks.length > 0;
+      el.checked = v === null || v === undefined ? !hasBlocks : !!v;
+      continue;
+    }
     if (kind === 'checkbox') el.checked = !!v;
     else el.value = v === undefined || v === null ? '' : v;
   }
@@ -1746,6 +1756,8 @@ function fillSettings(s) {
     rows: Math.max(1, Number(s.gridRows) || 3),
     cols: Math.max(1, Number(s.gridCols) || 1),
   };
+  // 设置回推时不重绘网格（怕打断拖拽），但状态提示必须跟上
+  refreshGridHint();
 
   // 主题选择器反映当前配色
   const themeSel = $('s-colorTheme');
@@ -2119,12 +2131,28 @@ function renderGridEditor(onChange) {
     }
   }
 
+  refreshGridHint();
+}
+
+/**
+ * 刷新网格编辑器下方那行状态提示。
+ * 单独抽出来是因为它不只依赖网格内容，还依赖「使用预设样式」开关 ——
+ * 开关一变就得刷新，而那时不需要重绘整个网格。
+ */
+function refreshGridHint() {
   const hint = $('grid-hint');
-  if (hint) {
-    hint.textContent = gridState.blocks.length
-      ? `已放置 ${gridState.blocks.length} 个块 · 网格 ${gridState.rows}×${gridState.cols}`
-      : '网格为空时悬浮窗会使用「样式」下拉里的固定布局';
-  }
+  if (!hint) return;
+
+  const count = gridState.blocks.length;
+  const base = count
+    ? `已放置 ${count} 个块 · 网格 ${gridState.rows}×${gridState.cols}`
+    : '网格为空时悬浮窗会使用「样式」下拉里的固定布局';
+
+  // 开着预设样式时网格不生效，这点必须写在提示里，否则用户排了半天看不到变化
+  const presetOn = $('s-usePresetStyle') ? $('s-usePresetStyle').checked : true;
+  hint.textContent = presetOn && count
+    ? `${base} · 当前未生效（已开启「使用预设样式」）`
+    : base;
 }
 
 /* ===================== 主界面主题 ===================== */
@@ -2220,6 +2248,8 @@ function init() {
     if (!el) continue;
     el.addEventListener('input', () => {
       if (kind === 'range') syncRangeLabels();
+      // 开关一变，网格提示里的「未生效」字样要跟着变
+      if (key === 'usePresetStyle') refreshGridHint();
       // 滑块/颜色拖动用防抖，勾选框和数字框立即生效
       pushSettings(kind === 'checkbox');
     });

@@ -272,9 +272,26 @@ public sealed class OverlayForm : Form
     /// <summary>是否双列布局（样式3）。</summary>
     private bool IsTwoColumn => _settings.OverlayStyle == 3;
 
-    /// <summary>是否使用用户自定义的自由网格布局。</summary>
+    /// <summary>
+    /// 「使用预设样式」开关的实际取值。
+    /// 设置里的字段是可空的：老配置（v1.0.3 起网格就是"有块就用"）里没有这一项，
+    /// 反序列化后是 null，表示用户没表过态 —— 这时按老行为推导，
+    /// 有网格块就走网格，没网格块就走预设样式，升级后版式不会突然变样。
+    /// </summary>
+    private bool UsePresetStyleResolved =>
+        _settings.UsePresetStyle
+        ?? !(_settings.OverlayBlocks != null && _settings.OverlayBlocks.Count > 0);
+
+    /// <summary>
+    /// 是否使用用户自定义的自由网格布局。
+    /// 由设置页的「使用预设样式」开关决定：开关打开走预设样式（样式1/2/3），
+    /// 关闭才走网格。网格为空时无论开关如何都退回预设样式，
+    /// 否则关掉开关会让悬浮窗变空、看起来像"消失"。
+    /// </summary>
     private bool UseGridLayout =>
-        _settings.OverlayBlocks != null && _settings.OverlayBlocks.Count > 0;
+        !UsePresetStyleResolved
+        && _settings.OverlayBlocks != null
+        && _settings.OverlayBlocks.Count > 0;
 
     /// <summary>
     /// 按块类型取显示内容。返回 (label, value)；

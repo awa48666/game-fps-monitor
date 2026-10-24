@@ -30,6 +30,17 @@ public sealed class OverlaySettings
     /// </summary>
     public int OverlayStyle { get; set; } = 1;
 
+    /// <summary>
+    /// 是否使用预设样式（上面的 OverlayStyle）。
+    /// 关闭时改用网格布局编辑器排出来的自由布局（OverlayBlocks）；
+    /// 网格为空时无论如何都退回预设样式，避免关掉开关后悬浮窗整个消失。
+    ///
+    /// 用可空类型是为了兼容老配置：v1.0.3 起网格布局一直是有块就用，
+    /// 这些配置文件里没有本字段，反序列化后是 null。null 表示"没表过态"，
+    /// 由 OverlayForm 推导成"有网格块就走网格"，老用户的版式不会突然变样。
+    /// </summary>
+    public bool? UsePresetStyle { get; set; }
+
     /// <summary>检测到游戏时自动显示悬浮窗。</summary>
     public bool AutoShowOnGame { get; set; } = true;
     public int X { get; set; } = 24;
@@ -99,8 +110,8 @@ public sealed class OverlaySettings
 
     // ---- 自由网格布局（在设置页拖拽编排）----
     /// <summary>
-    /// 网格里已放置的数据块。列表为空时退回 OverlayStyle 的固定布局，
-    /// 保证老配置仍然可用。
+    /// 网格里已放置的数据块。是否真的用它还取决于 UsePresetStyle：
+    /// 开关打开走预设样式，关闭才用这里排版；列表本身为空时也退回预设样式。
     /// </summary>
     public List<OverlayBlock> OverlayBlocks { get; set; } = new();
 
