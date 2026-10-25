@@ -1630,9 +1630,16 @@ function drawCrosshairPreview() {
   const cv = $('cx-preview');
   if (!cv) return;
 
+  // 格子本身就是屏幕的缩影：宽固定，高按目标屏宽高比走
+  // （16:9 屏 → 260×146，4:3 → 260×195），不再是正方形
+  const scr = cxTargetScreen();
+  const cssW = Math.round(cv.getBoundingClientRect().width) || 260;
+  const cssH = Math.max(60, Math.round(cssW * scr.h / scr.w));
+  if (cv.style.height !== cssH + 'px') cv.style.height = cssH + 'px';
+
   const rect = cv.getBoundingClientRect();
   const w = Math.max(1, Math.round(rect.width || 240));
-  const h = Math.max(1, Math.round(rect.height || 240));
+  const h = Math.max(1, Math.round(rect.height || Math.round(w * scr.h / scr.w)));
   const dpr = window.devicePixelRatio || 1;
 
   if (cv.width !== Math.round(w * dpr) || cv.height !== Math.round(h * dpr)) {
@@ -1648,7 +1655,6 @@ function drawCrosshairPreview() {
 
   // 预览格子 = 目标屏的等比例缩影：画布按屏幕宽高比缩放，准星按同一比例画，
   // 预览里的大小就是它在屏幕上的真实占比
-  const scr = cxTargetScreen();
   let fit = Math.min(w / scr.w, h / scr.h);
 
   // 图片准星：后端把图片拉伸成正方形画在 size×size 内，这里用同样的几何预览，
