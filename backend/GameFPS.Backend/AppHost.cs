@@ -530,15 +530,17 @@ public sealed class AppHost : IDisposable
     /// </summary>
     private void ApplyAutoStart(bool enabled)
     {
+        // SetEnabled 返回的是「注册表是否已到达目标状态」，是个成功标志，
+        // 不是新状态本身 —— 取消勾选时它同样返回 true（成功删掉了值）。
+        // 所以真正的状态要分开算：成功就直接用请求值，失败则回读注册表实况。
         bool ok = AutoStartManager.SetEnabled(enabled);
+        bool actual = ok ? enabled : AutoStartManager.IsEnabled();
 
-        _autoStartKnown = ok;
-        _settings.AutoStart = ok;
-        if (!ok)
-        {
-            // 写失败（组策略限制、注册表只读等）时把菜单勾选弹回去
-            _tray?.SetAutoStartChecked(AutoStartManager.IsEnabled());
-        }
+        _autoStartKnown = actual;
+        _settings.AutoStart = actual;
+        // 无论成功失败都回推一次菜单勾选：勾上/取消都必须让托盘与实况一致，
+        // 而不是只在失败时才弹回去。
+        _tray?.SetAutoStartChecked(actual);
         _settings.Save();
 
         if (!ok) _tray?.ShowBalloon("开机自启设置失败", "写入注册表启动项被拒绝。");

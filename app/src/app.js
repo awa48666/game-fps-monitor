@@ -8,6 +8,8 @@ let ws = null;
 let reconnectTimer = null;
 let latest = null;
 let settings = null;
+/** 上一次发给主进程的关闭策略，避免每条设置广播都重复发一次 IPC。 */
+let lastClosePolicy = null;
 
 /** 用户是否正在设置页的某个输入控件上操作（热更新时用来抑制回填）。 */
 /** 同步由后端拍板的布尔开关（开机自启 / 关闭行为）。 */
@@ -22,9 +24,15 @@ function syncAuthoritativeSwitches(s) {
     if (close.checked !== want) close.checked = want;
   }
 
-  // 顺带给主进程也同步一次：托盘菜单改过关闭行为时，这里能兜住
-  if (window.gamefps && window.gamefps.setClosePolicy) {
-    window.gamefps.setClosePolicy(s.minimizeOnClose === false ? 'quit' : 'minimize');
+  // 顺带给主进程也同步一次：托盘菜单改过关闭行为时，这里能兜住。
+  // 只在真的变了时才发 —— 后端每次回推设置都会走到这里，
+  // 无条件发等于让每一条设置广播都多一次 IPC。
+  const policy = s.minimizeOnClose === false ? 'quit' : 'minimize';
+  if (policy !== lastClosePolicy) {
+    lastClosePolicy = policy;
+    if (window.gamefps && window.gamefps.setClosePolicy) {
+      window.gamefps.setClosePolicy(policy);
+    }
   }
 }
 
@@ -313,6 +321,11 @@ function renderHistory(list) {
   const chartWrap = $('history-chart-wrap');
   if (!listEl) return;
 
+  // 详情卡可能被上次点击挪进了列表；先送回页面末尾，否则会被下面的 innerHTML 重建吞掉
+  const pageEl = $('page-history');
+  const detailEl = $('history-detail');
+  if (detailEl && pageEl && detailEl.parentElement !== pageEl) pageEl.appendChild(detailEl);
+
   if (count) count.textContent = list.length ? `共 ${list.length} 条` : '';
 
   if (!list.length) {
@@ -344,6 +357,9 @@ function renderHistory(list) {
     el.addEventListener('click', () => {
       listEl.querySelectorAll('.hist-card').forEach((x) => x.classList.remove('active'));
       el.classList.add('active');
+      // 详情卡直接插到选中的记录卡后面，而不是固定在页面底部
+      const detail = $('history-detail');
+      if (detail) el.insertAdjacentElement('afterend', detail);
       showDetail(history[Number(el.dataset.idx)]);
     });
   });
@@ -2537,18 +2553,12 @@ function init() {
   // 调整位置：切换悬浮窗的拖动模式
   let dragMode = false;
   const dragBtn = $('btn-drag-overlay');
-  const dragHint = $('drag-hint');
   if (dragBtn) {
     dragBtn.addEventListener('click', () => {
       dragMode = !dragMode;
       send({ type: 'setOverlayDragMode', enabled: dragMode });
       dragBtn.classList.toggle('dragging', dragMode);
       dragBtn.textContent = dragMode ? '完成调整' : '调整位置';
-      if (dragHint) {
-        dragHint.textContent = dragMode
-          ? '拖动模式已开启：直接拖动屏幕上的悬浮窗，拖完点「完成调整」。'
-          : '点「调整位置」后，直接拖动屏幕上的悬浮窗到想要的地方，拖完再点一次结束。';
-      }
     });
   }
 
@@ -2579,6 +2589,16 @@ function init() {
       } else if (window.gamefps.forceQuit) {
         window.gamefps.forceQuit();
       }
+    });
+  }
+
+  // 窗口被托盘重新唤起时补拉一次设置。
+  // 界面是被 hide() 藏起来的而不是销毁，隐藏期间后端可能被托盘菜单改动过
+  // （比如在托盘里取消开机自启），不重新拉一次就会看到过期状态。
+  if (window.gamefps && window.gamefps.onShown) {
+    window.gamefps.onShown(() => {
+      if (ws && ws.readyState === WebSocket.OPEN) send({ type: 'hello' });
+      else connect();
     });
   }
 

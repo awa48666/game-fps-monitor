@@ -335,6 +335,9 @@ select.text option { background: var(--input-bg); color: var(--text); }
   gap: 10px;
 }
 
+/* 详情卡挪进记录网格后横跨整行，始终铺在选中卡片所在行的下方 */
+#history-detail { grid-column: 1 / -1; }
+
 .hist-card {
   position: relative;
   background: var(--panel-2);
