@@ -1163,6 +1163,10 @@ function renderCxPresetImages() {
     const name = u.name || basenameOf(u.path || '');
     if (!name) continue;
 
+    // 点内置预设时,后端也会把图落盘一份到用户图目录,回推列表里就多了
+    // 与内置同名的副本 —— 跳过它,同一张图只留内置那一格
+    if (CX_PRESET_IMAGES.some((p) => p.file === name)) continue;
+
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'cx-preset-img own' + (activeName === name ? ' active' : '');
