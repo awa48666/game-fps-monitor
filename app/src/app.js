@@ -321,6 +321,11 @@ function renderHistory(list) {
   const chartWrap = $('history-chart-wrap');
   if (!listEl) return;
 
+  // 详情卡可能被上次点击挪进了列表；先送回页面末尾，否则会被下面的 innerHTML 重建吞掉
+  const pageEl = $('page-history');
+  const detailEl = $('history-detail');
+  if (detailEl && pageEl && detailEl.parentElement !== pageEl) pageEl.appendChild(detailEl);
+
   if (count) count.textContent = list.length ? `共 ${list.length} 条` : '';
 
   if (!list.length) {
@@ -352,6 +357,9 @@ function renderHistory(list) {
     el.addEventListener('click', () => {
       listEl.querySelectorAll('.hist-card').forEach((x) => x.classList.remove('active'));
       el.classList.add('active');
+      // 详情卡直接插到选中的记录卡后面，而不是固定在页面底部
+      const detail = $('history-detail');
+      if (detail) el.insertAdjacentElement('afterend', detail);
       showDetail(history[Number(el.dataset.idx)]);
     });
   });
@@ -2545,18 +2553,12 @@ function init() {
   // 调整位置：切换悬浮窗的拖动模式
   let dragMode = false;
   const dragBtn = $('btn-drag-overlay');
-  const dragHint = $('drag-hint');
   if (dragBtn) {
     dragBtn.addEventListener('click', () => {
       dragMode = !dragMode;
       send({ type: 'setOverlayDragMode', enabled: dragMode });
       dragBtn.classList.toggle('dragging', dragMode);
       dragBtn.textContent = dragMode ? '完成调整' : '调整位置';
-      if (dragHint) {
-        dragHint.textContent = dragMode
-          ? '拖动模式已开启：直接拖动屏幕上的悬浮窗，拖完点「完成调整」。'
-          : '点「调整位置」后，直接拖动屏幕上的悬浮窗到想要的地方，拖完再点一次结束。';
-      }
     });
   }
 
