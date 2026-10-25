@@ -235,13 +235,15 @@
 
         <div class="row">
           <span>图片尺寸</span>
-          <input type="range" id="cx-image-size" min="8" max="200" step="1" value="64">
+          <input type="range" id="cx-image-size" min="8" max="512" step="1" value="64">
           <b id="cx-image-size-val" class="mono"></b>
+          <button type="button" id="btn-cx-image-native" class="mini" title="按图片原始像素 1:1 显示">1:1 原图</button>
         </div>
         <div class="row">
           <button type="button" id="btn-cx-pick-image" class="mini">选择本地图片…</button>
           <input type="file" id="cx-image-file" accept="image/*" hidden>
           <span id="cx-image-name" class="muted small">未选择图片</span>
+          <span id="cx-image-dims" class="muted small"></span>
         </div>
         <p class="muted small">
           支持 PNG / JPG / GIF / BMP。非正方形的图片会被拉伸成正方形；

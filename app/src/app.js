@@ -1120,6 +1120,8 @@ function renderCxRenderMode() {
     }
   }
 
+  updateCxDims();
+
   const panel = $('cx-image-panel');
   const note = $('cx-procedural-note');
   if (panel) panel.hidden = cxMode === 'procedural';
@@ -1301,6 +1303,7 @@ function refreshCxPreviewImage(explicitName) {
   if (!src) {
     cxPreviewImage = null;
     cxPreviewImageKey = null;
+    updateCxDims();
     return;
   }
 
@@ -1310,14 +1313,29 @@ function refreshCxPreviewImage(explicitName) {
   img.onload = () => {
     cxPreviewImage = img;
     cxPreviewImageKey = src;
+    updateCxDims();
     drawCrosshairPreview();
   };
   img.onerror = () => {
     cxPreviewImage = null;
     cxPreviewImageKey = null;
+    updateCxDims();
     drawCrosshairPreview();
   };
   img.src = src;
+}
+
+/** 显示当前图片的原始像素，方便把尺寸滑块对准 1:1。 */
+function updateCxDims() {
+  const el = $('cx-image-dims');
+  if (!el) return;
+  if (cxMode === 'image' && cxPreviewImage && (cxPreviewImage.naturalWidth || cxPreviewImage.width)) {
+    const w = cxPreviewImage.naturalWidth || cxPreviewImage.width;
+    const h = cxPreviewImage.naturalHeight || cxPreviewImage.height;
+    el.textContent = `原图 ${w}×${h}`;
+  } else {
+    el.textContent = '';
+  }
 }
 
 // ---------- 我的预设 ----------
@@ -2424,6 +2442,23 @@ function init() {
   if (cxImageSize) {
     cxImageSize.addEventListener('input', () => { syncCxLabels(); drawCrosshairPreview(); cxPush(); });
     cxImageSize.addEventListener('change', () => { syncCxLabels(); drawCrosshairPreview(); cxNow(); });
+  }
+
+  // 1:1 原图：把尺寸滑块直接对准当前图片的原始像素
+  const cxNativeBtn = $('btn-cx-image-native');
+  if (cxNativeBtn) {
+    cxNativeBtn.addEventListener('click', () => {
+      if (!cxImageSize) return;
+      if (cxMode !== 'image' || !cxPreviewImage) return;
+      const w = cxPreviewImage.naturalWidth || cxPreviewImage.width;
+      const h = cxPreviewImage.naturalHeight || cxPreviewImage.height;
+      if (!w && !h) return;
+      const native = Math.max(8, Math.min(512, Math.round(Math.min(w, h))));
+      cxImageSize.value = String(native);
+      syncCxLabels();
+      drawCrosshairPreview();
+      cxNow();
+    });
   }
 
   const cxImageFile = $('cx-image-file');
