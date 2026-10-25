@@ -178,6 +178,12 @@ public sealed class MonitorEngine : IDisposable
     public bool IsElevated => EtwFrameCapture.IsElevated;
     public string? StartError { get; private set; }
 
+    /// <summary>
+    /// 切换 CPU 占用率口径："utility"（任务管理器口径）或其他值（time，纯时间占比）。
+    /// 转发给 HardwareMonitor；口径没变时内部不会重建计数器。
+    /// </summary>
+    public void SetCpuUsageMetric(string? metric) => _hw.SetCpuMetric(!string.Equals(metric, "time", StringComparison.OrdinalIgnoreCase));
+
     public bool Start()
     {
         _capture.FramePresented += OnFrame;

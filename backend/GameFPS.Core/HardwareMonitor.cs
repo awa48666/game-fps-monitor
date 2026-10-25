@@ -61,6 +61,36 @@ public sealed class HardwareMonitor : IDisposable
     /// <summary>是否存在大小核混合架构。</summary>
     public bool HasHeterogeneousCores => _eLogical.Length > 0;
 
+    /// <summary>占用率口径：true = % Processor Utility（任务管理器口径），false = % Processor Time。</summary>
+    public bool UseUtilityMetric { get; private set; } = true;
+
+    /// <summary>
+    /// 切换占用率口径。只在值真的变化时重建计数器（低频操作）；
+    /// 重建后的首拍读数是预热值，可能偏低一拍，属正常。
+    /// </summary>
+    public void SetCpuMetric(bool utility)
+    {
+        if (utility == UseUtilityMetric) return;
+        UseUtilityMetric = utility;
+
+        _cpuTotal?.Dispose();
+        _cpuTotal = CreateTotalCounter();
+
+        foreach (var c in _coreTime.Values) c.Dispose();
+        _coreTime.Clear();
+        foreach (var lp in _pLogical.Concat(_eLogical))
+        {
+            try
+            {
+                var tc = new PerformanceCounter("Processor Information",
+                    UseUtilityMetric ? "% Processor Utility" : "% Processor Time", $"0,{lp}", true);
+                tc.NextValue();
+                _coreTime[lp] = tc;
+            }
+            catch { }
+        }
+    }
+
     public double GpuFrequencyMHz => _nvml.GraphicsClockMHz;
     public double GpuPowerW => _nvml.PowerW;
     public bool HasGpuSensors => _nvml.IsAvailable;
@@ -85,30 +115,38 @@ public sealed class HardwareMonitor : IDisposable
 
     public HardwareMonitor()
     {
+        _cpuTotal = CreateTotalCounter();
+
+        InitFrequencyAndPower();
+        InitCoreCounters();
+        InitThermalZone();
+    }
+
+    /// <summary>
+    /// 建总占用计数器。用 % Processor Utility，与任务管理器 / Process Lasso 的口径一致：
+    /// 它把睿频折算成"等效基准频率的功用"，用户平时看到的数字就是它。
+    /// 纯时间占比的 % Processor Time 只作为老系统的回退（Win8 起才有 Utility）。
+    /// Utility 超过 100% 属正常，采样处像任务管理器一样封顶到 100。
+    /// </summary>
+    private PerformanceCounter? CreateTotalCounter()
+    {
         try
         {
-            // 用 % Processor Utility，与任务管理器 / Process Lasso 的口径一致：
-            // 它把睿频折算成"等效基准频率的功用"，用户平时看到的数字就是它。
-            // 之前用的 % Processor Time 是纯时间占比，轻负载高睿频时与任务管理器
-            // 差得极远（实测同秒 7% vs 28%，个别核 0% vs 53%）。
-            // Utility 超过 100% 属正常，这里像任务管理器一样封顶到 100。
-            _cpuTotal = new PerformanceCounter("Processor Information", "% Processor Utility", "_Total", true);
-            _cpuTotal.NextValue();     // 预热，首值恒为 0
+            var c = new PerformanceCounter("Processor Information", "% Processor Utility", "_Total", true);
+            c.NextValue();     // 预热，首值恒为 0
+            return c;
         }
         catch
         {
             // Win7 等老系统没有 Utility 计数器，退回传统口径，别让 CPU 显示 0
             try
             {
-                _cpuTotal = new PerformanceCounter("Processor Information", "% Processor Time", "_Total", true);
-                _cpuTotal.NextValue();
+                var c = new PerformanceCounter("Processor Information", "% Processor Time", "_Total", true);
+                c.NextValue();
+                return c;
             }
-            catch { _cpuTotal = null; }
+            catch { return null; }
         }
-
-        InitFrequencyAndPower();
-        InitCoreCounters();
-        InitThermalZone();
     }
 
     /// <summary>

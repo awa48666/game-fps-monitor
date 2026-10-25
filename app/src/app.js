@@ -1541,7 +1541,7 @@ function downscaleForPreview(img, target) {
     for (let i = 3; i < dst.data.length; i += 4) dstEnergy += dst.data[i];
     if (dstEnergy <= 0) return c;
 
-    const gain = Math.min(8, srcEnergy / dstEnergy);
+    const gain = Math.min(16, srcEnergy / dstEnergy);
     if (gain <= 1.05) return c;
 
     for (let i = 3; i < dst.data.length; i += 4) {
@@ -1730,6 +1730,7 @@ const FIELDS = [
   ['maxSessionsInHistory', 'number'],
   ['priorityClass', 'text'],
   ['uiTheme', 'text'],
+  ['cpuUsageMetric', 'text'],
 ];
 
 /* ===================== 悬浮窗配色主题 ===================== */

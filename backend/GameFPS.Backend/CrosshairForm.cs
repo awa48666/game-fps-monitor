@@ -499,8 +499,10 @@ public sealed class CrosshairForm : Form
     /// <summary>
     /// 缩放并补偿 alpha 能量。细线条直接一次缩到 1/3 以下会被插值摊平成
     /// alpha 极低的雾：总覆盖率没丢，只是被摊到了更大面积上，单像素亮度掉光。
-    /// 按"源图 alpha 总和 / 缩放后 alpha 总和"补一个增益（上限 8 倍，避免
-    /// 空白图被放大成噪声），线条就能恢复可见而不变粗。
+    /// 按"源图 alpha 总和 / 缩放后 alpha 总和"补一个增益，线条就能恢复可见而不变粗。
+    /// 增益上限 16：内置 220px 预设缩到 64px 时实测需要 9.6~11.9，原上限 8
+    /// 会把这些细线图截断在"仍然偏淡"；空白图由 srcEnergy<=0 分支挡住，
+    /// 上限只为防极端噪声。
     /// </summary>
     private static Bitmap PrepareSource(Image img, int target)
     {
@@ -578,7 +580,7 @@ public sealed class CrosshairForm : Form
 
             if (dstEnergy <= 0) return;
 
-            double gain = Math.Min(8.0, (double)srcEnergy / dstEnergy);
+            double gain = Math.Min(16.0, (double)srcEnergy / dstEnergy);
             if (gain <= 1.05) return;   // 本来就没损失，不折腾
 
             for (int y = 0; y < scaled.Height; y++)
