@@ -333,6 +333,8 @@ select.text option { background: var(--input-bg); color: var(--text); }
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
   gap: 10px;
+  /* dense 回填：详情卡插到选中卡后面时，同行的其余卡片留在原位不被挤走 */
+  grid-auto-flow: row dense;
 }
 
 /* 详情卡挪进记录网格后横跨整行，始终铺在选中卡片所在行的下方 */
