@@ -1254,6 +1254,21 @@ function pickCxImage(file) {
     renderCxRenderMode();
     const nameEl = $('cx-image-name');
     if (nameEl) nameEl.textContent = file.name;
+
+    // 原始大图不该一导入就被压小：图片原始短边比当前尺寸大时，
+    // 自动把尺寸升到 1:1（≤512），换大图第一眼就是原大小
+    const probe = new Image();
+    probe.onload = () => {
+      const native = Math.round(Math.min(probe.naturalWidth || 0, probe.naturalHeight || 0));
+      const slider = $('cx-image-size');
+      if (native > 0 && slider && native > Number(slider.value)) {
+        slider.value = String(Math.min(512, native));
+        syncCxLabels();
+        drawCrosshairPreview();
+      }
+    };
+    probe.src = String(reader.result);
+
     await sendCxImage(file.name, String(reader.result));
   };
   reader.readAsDataURL(file);
