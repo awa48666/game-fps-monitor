@@ -364,20 +364,23 @@
           <span>启用悬浮窗</span>
         </label>
         <span class="gap"></span>
+        <button id="btn-drag-overlay" class="mini">调整位置</button>
+      </div>
+      <div class="row inline">
+        <label class="toggle">
+          <input type="checkbox" id="s-usePresetStyle">
+          <span>使用预设样式</span>
+        </label>
+        <span class="gap"></span>
         <span>样式</span>
         <select id="s-overlayStyle" class="text">
           <option value="1">样式1（竖排单列）</option>
           <option value="2">样式2（横排单行）</option>
           <option value="3">样式3（竖排双列）</option>
         </select>
-        <button id="btn-drag-overlay" class="mini">调整位置</button>
       </div>
-      <label class="row toggle">
-        <input type="checkbox" id="s-usePresetStyle">
-        <span>使用预设样式</span>
-      </label>
       <p class="muted small" id="preset-style-hint">
-        打开时用上面的「样式」选项排版；关闭时改用下面的网格布局编辑器排出来的版式。
+        打开时用「样式」选项排版；关闭时改用下面的网格布局编辑器排出来的版式。
       </p>
       <label class="row toggle">
         <input type="checkbox" id="s-autoShowOnGame">
