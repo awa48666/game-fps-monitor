@@ -87,14 +87,24 @@ public sealed class HardwareMonitor : IDisposable
     {
         try
         {
-            // 用 % Processor Time 而不是 % Processor Utility：
-            // 后者按处理器"性能利用率"计算，在支持睿频 / 大小核混合架构的 CPU 上
-            // 会明显虚高（实测 i5-13500HX 上跑到 108~115%，而真实占用只有 68%）。
-            // % Processor Time 是传统的时间占比口径，与任务管理器、WMI 一致。
-            _cpuTotal = new PerformanceCounter("Processor Information", "% Processor Time", "_Total", true);
+            // 用 % Processor Utility，与任务管理器 / Process Lasso 的口径一致：
+            // 它把睿频折算成"等效基准频率的功用"，用户平时看到的数字就是它。
+            // 之前用的 % Processor Time 是纯时间占比，轻负载高睿频时与任务管理器
+            // 差得极远（实测同秒 7% vs 28%，个别核 0% vs 53%）。
+            // Utility 超过 100% 属正常，这里像任务管理器一样封顶到 100。
+            _cpuTotal = new PerformanceCounter("Processor Information", "% Processor Utility", "_Total", true);
             _cpuTotal.NextValue();     // 预热，首值恒为 0
         }
-        catch { _cpuTotal = null; }
+        catch
+        {
+            // Win7 等老系统没有 Utility 计数器，退回传统口径，别让 CPU 显示 0
+            try
+            {
+                _cpuTotal = new PerformanceCounter("Processor Information", "% Processor Time", "_Total", true);
+                _cpuTotal.NextValue();
+            }
+            catch { _cpuTotal = null; }
+        }
 
         InitFrequencyAndPower();
         InitCoreCounters();
@@ -177,7 +187,8 @@ public sealed class HardwareMonitor : IDisposable
                 string inst = $"0,{lp}";
                 try
                 {
-                    var tc = new PerformanceCounter("Processor Information", "% Processor Time", inst, true);
+                    // 占用与总数一样用 Utility 口径，与任务管理器一致
+                    var tc = new PerformanceCounter("Processor Information", "% Processor Utility", inst, true);
                     tc.NextValue();
                     _coreTime[lp] = tc;
 
@@ -271,7 +282,8 @@ public sealed class HardwareMonitor : IDisposable
     /// <summary>
     /// 采样大小核的占用率与频率。
     ///
-    /// 占用率是准确实测值。频率只能推算，因为 Windows 拿不到单核实际频率：
+    /// 占用率与总数同口径（% Processor Utility，任务管理器口径）。频率只能推算，
+    /// 因为 Windows 拿不到单核实际频率：
     ///   · 每核的 Actual Frequency 计数器恒为 0；
     ///   · 每核的 Actual Frequency 计数器实测多为 0，不能当数据源；
     ///   · CallNtPowerInformation 报的是当前 P-State 频率（能反映睿频），
