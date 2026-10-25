@@ -855,6 +855,9 @@ let cxPreviewImageKey = null;
  */
 let cxUserImages = [];
 
+/** 后端回推的显示器列表（index/primary/width/height），预览按目标屏分辨率等比例缩放用。 */
+let cxDisplays = [];
+
 /** 由 init() 注入：把准星改动防抖后下发给后端。 */
 let cxPush = null;
 /** 由 init() 注入：立即下发（点选类操作，不等防抖）。 */
@@ -1040,6 +1043,7 @@ function renderCxColors() {
 /** 显示器下拉框。value 用 -1 表示主显示器。 */
 function renderDisplays(list) {
   const sel = $('cx-monitor');
+  cxDisplays = Array.isArray(list) ? list : [];
   if (!sel) return;
 
   // 重建选项会把选择清掉，先把界面当前真正选中的那个记下来
@@ -1174,6 +1178,21 @@ function renderCxPresetImages() {
     btn.className = 'cx-preset-img own' + (activeName === name ? ' active' : '');
     btn.title = name;
 
+    // 删除这一格：删盘上的文件；删的是当前在用图时后端自动回退程序绘制
+    const del = document.createElement('span');
+    del.className = 'cx-img-del';
+    del.title = '删除这张图片';
+    del.textContent = '✕';
+    del.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (!confirm(`确定删除图片「${name}」吗？\n屏幕准星若正在用它，会自动回到程序绘制。`)) return;
+      try { localStorage.removeItem(CX_IMG_CACHE_PREFIX + name); } catch { /* 忽略 */ }
+      cxUserImages = cxUserImages.filter((u) => (u.name || basenameOf(u.path || '')) !== name);
+      renderCxPresetImages();
+      send({ type: 'deleteCrosshairImage', data: { name } });
+    });
+    btn.appendChild(del);
+
     const img = document.createElement('img');
     img.alt = name;
     // 自选图的字节在 localStorage 里有缓存；没缓存就先留空，等图片列表回推后补
@@ -1262,7 +1281,7 @@ function pickCxImage(file) {
       const native = Math.round(Math.min(probe.naturalWidth || 0, probe.naturalHeight || 0));
       const slider = $('cx-image-size');
       if (native > 0 && slider && native > Number(slider.value)) {
-        slider.value = String(Math.min(512, native));
+        slider.value = String(Math.min(1024, native));
         syncCxLabels();
         drawCrosshairPreview();
       }
@@ -1593,6 +1612,20 @@ function downscaleForPreview(img, target) {
   }
 }
 
+/** 准星目标屏的分辨率：优先用后端回推的显示器列表（含 primary 标记），
+ *  列表还没到时退回主窗口所在屏。预览按它等比例缩放 = 所见即所得。 */
+function cxTargetScreen() {
+  const idx = Number(($('cx-monitor') || {}).value);
+  const list = cxDisplays;
+  if (Array.isArray(list) && list.length) {
+    const pick = list.find((d) => Number(d.index) === idx)
+      || list.find((d) => d.primary)
+      || list[0];
+    if (pick && pick.width > 0 && pick.height > 0) return { w: pick.width, h: pick.height };
+  }
+  return { w: window.screen.width || 1920, h: window.screen.height || 1080 };
+}
+
 function drawCrosshairPreview() {
   const cv = $('cx-preview');
   if (!cv) return;
@@ -1613,12 +1646,18 @@ function drawCrosshairPreview() {
 
   const s = readCrosshair();
 
+  // 预览格子 = 目标屏的等比例缩影：画布按屏幕宽高比缩放，准星按同一比例画，
+  // 预览里的大小就是它在屏幕上的真实占比
+  const scr = cxTargetScreen();
+  let fit = Math.min(w / scr.w, h / scr.h);
+
   // 图片准星：后端把图片拉伸成正方形画在 size×size 内，这里用同样的几何预览，
   // 透明度也照样作用在图上，做到"预览即所见"。
   if (cxMode !== 'procedural' && cxPreviewImage) {
     const target = Math.max(8, Number(s.imageSize) || 64);
-    const scale = Math.min(1, (Math.min(w, h) - 24) / target);
-    const draw = target * scale;
+    // 等比例下准星不会超过屏幕，但极端设置（尺寸比屏幕还大）时收一下防溢出
+    fit = Math.min(fit, (Math.min(w, h) - 8) / target);
+    const draw = target * fit;
     g.globalAlpha = Math.max(0, Math.min(255, Number(s.opacity) || 0)) / 255;
     // 后端 RenderImageBitmap 会先把大图预缩到目标尺寸的 3 倍再画，
     // 避免细线图（donk/s1mple/TShape 这类）被一次性双三次拉糊。
@@ -1626,6 +1665,7 @@ function drawCrosshairPreview() {
     const src = downscaleForPreview(cxPreviewImage, Math.round(draw));
     g.drawImage(src, (w - draw) / 2, (h - draw) / 2, draw, draw);
     g.globalAlpha = 1;
+    updateCxPreviewCaption(scr);
     return;
   }
 
@@ -1639,7 +1679,8 @@ function drawCrosshairPreview() {
     3,
   );
 
-  const scale = Math.min(1, (Math.min(w, h) / 2 - 10) / span);
+  // 同一个 fit：程序绘制的准星也按屏幕等比例，跟图片模式口径一致
+  const scale = Math.min(fit, (Math.min(w, h) / 2 - 4) / span);
 
   g.save();
   g.translate(w / 2, h / 2);
@@ -1716,6 +1757,13 @@ function drawCrosshairPreview() {
   }
 
   g.restore();
+  updateCxPreviewCaption(scr);
+}
+
+/** 预览说明：标注当前按哪块屏的分辨率等比例，所见即所得。 */
+function updateCxPreviewCaption(scr) {
+  const el = document.querySelector('.cx-preview-caption');
+  if (el) el.textContent = `实时预览 · 按 ${scr.w}×${scr.h} 等比例（棋盘格 = 透明区域）`;
 }
 
 /* ===================== 设置页 ===================== */
@@ -2468,7 +2516,7 @@ function init() {
       const w = cxPreviewImage.naturalWidth || cxPreviewImage.width;
       const h = cxPreviewImage.naturalHeight || cxPreviewImage.height;
       if (!w && !h) return;
-      const native = Math.max(8, Math.min(512, Math.round(Math.min(w, h))));
+      const native = Math.max(8, Math.min(1024, Math.round(Math.min(w, h))));
       cxImageSize.value = String(native);
       syncCxLabels();
       drawCrosshairPreview();

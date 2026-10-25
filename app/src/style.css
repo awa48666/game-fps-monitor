@@ -754,6 +754,7 @@ code {
 }
 
 .cx-preset-img {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -764,6 +765,26 @@ code {
   background: #14171d;
   cursor: pointer;
 }
+
+/* 自选图格子右上角的删除角标：平时半透明，悬停格子才醒目 */
+.cx-img-del {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 18px;
+  height: 18px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: #8a93a3;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .15s, color .15s, border-color .15s;
+}
+.cx-preset-img:hover .cx-img-del { opacity: .65; }
+.cx-img-del:hover { opacity: 1; color: var(--err, #e06c75); border-color: var(--err, #e06c75); }
 
 .cx-preset-img img {
   width: 52px;
