@@ -182,6 +182,12 @@ public sealed class OverlaySettings
     /// </summary>
     public string PriorityClass { get; set; } = "Normal";
 
+    /// <summary>
+    /// CPU 占用率口径："utility"（任务管理器 / Process Lasso 口径，折算睿频，默认）
+    /// 或 "time"（纯线程时间占比）。影响总占用与大/小核占用。
+    /// </summary>
+    public string CpuUsageMetric { get; set; } = "utility";
+
     [JsonIgnore]
     public static string DefaultPath => AppPaths.SettingsFile;
 

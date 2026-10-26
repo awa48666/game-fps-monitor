@@ -235,13 +235,15 @@
 
         <div class="row">
           <span>图片尺寸</span>
-          <input type="range" id="cx-image-size" min="8" max="200" step="1" value="64">
+          <input type="range" id="cx-image-size" min="8" max="1024" step="1" value="64">
           <b id="cx-image-size-val" class="mono"></b>
+          <button type="button" id="btn-cx-image-native" class="mini" title="按图片原始像素 1:1 显示">1:1 原图</button>
         </div>
         <div class="row">
           <button type="button" id="btn-cx-pick-image" class="mini">选择本地图片…</button>
           <input type="file" id="cx-image-file" accept="image/*" hidden>
           <span id="cx-image-name" class="muted small">未选择图片</span>
+          <span id="cx-image-dims" class="muted small"></span>
         </div>
         <p class="muted small">
           支持 PNG / JPG / GIF / BMP。非正方形的图片会被拉伸成正方形；
@@ -364,20 +366,23 @@
           <span>启用悬浮窗</span>
         </label>
         <span class="gap"></span>
+        <button id="btn-drag-overlay" class="mini">调整位置</button>
+      </div>
+      <div class="row inline">
+        <label class="toggle">
+          <input type="checkbox" id="s-usePresetStyle">
+          <span>使用预设样式</span>
+        </label>
+        <span class="gap"></span>
         <span>样式</span>
         <select id="s-overlayStyle" class="text">
           <option value="1">样式1（竖排单列）</option>
           <option value="2">样式2（横排单行）</option>
           <option value="3">样式3（竖排双列）</option>
         </select>
-        <button id="btn-drag-overlay" class="mini">调整位置</button>
       </div>
-      <label class="row toggle">
-        <input type="checkbox" id="s-usePresetStyle">
-        <span>使用预设样式</span>
-      </label>
       <p class="muted small" id="preset-style-hint">
-        打开时用上面的「样式」选项排版；关闭时改用下面的网格布局编辑器排出来的版式。
+        打开时用「样式」选项排版；关闭时改用下面的网格布局编辑器排出来的版式。
       </p>
       <label class="row toggle">
         <input type="checkbox" id="s-autoShowOnGame">
@@ -427,6 +432,13 @@
         <span>曲线高度</span>
         <input type="range" id="s-overlayChartHeight" min="16" max="120" step="4">
         <b id="s-overlayChartHeight-val" class="mono"></b>
+      </label>
+      <label class="row">
+        <span>CPU 占用口径</span>
+        <select id="s-cpuUsageMetric" class="text">
+          <option value="utility">任务管理器口径</option>
+          <option value="time">时间占比口径</option>
+        </select>
       </label>
     </div>
 
@@ -515,11 +527,6 @@
           <option value="High">高</option>
         </select>
       </label>
-      <p class="muted small">
-        「界面主题」只影响这个主窗口，悬浮窗配色在「位置与外观」里单独设置。<br>
-        「程序优先级」调高可以让采集线程更及时处理事件，代价是多占一点 CPU 时间片，通常选「正常」即可。
-        不提供「实时」—— 那会把鼠标键盘的输入响应也挤掉。
-      </p>
     </div>
 
     <div class="card">

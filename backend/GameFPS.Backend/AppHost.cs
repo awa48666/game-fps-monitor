@@ -195,6 +195,7 @@ public sealed class AppHost : IDisposable
         _engine.MaxSessionsInHistory = _settings.MaxSessionsInHistory;
         _engine.ManualTargetEnabled = _settings.ManualTargetEnabled;
         _engine.ManualTargetName = _settings.ManualTargetName;
+        _engine.SetCpuUsageMetric(_settings.CpuUsageMetric);
     }
 
     private void SendCandidates()
@@ -442,6 +443,15 @@ public sealed class AppHost : IDisposable
                     }
                     break;
 
+                case "deleteCrosshairImage":
+                    // data: { name } —— 删除用户导入的图片；删的是当前在用图时回退程序绘制
+                    if (doc.RootElement.TryGetProperty("data", out var delImgEl))
+                    {
+                        string? delName = delImgEl.TryGetProperty("name", out var dnEl) ? dnEl.GetString() : null;
+                        DeleteCrosshairImage(delName);
+                    }
+                    break;
+
                 case "setCrosshairEnabled":
                     // data: { value: true } —— 只要开关位，参数沿用当前设置
                     if (doc.RootElement.TryGetProperty("value", out var cxEl))
@@ -619,6 +629,41 @@ public sealed class AppHost : IDisposable
         catch
         {
             // 图片解不开就当没收到，前端还能重新选一次
+        }
+    }
+
+    /// <summary>
+    /// 删除一张用户导入的准星图。删的若是当前正在使用的图，
+    /// 关掉 UseCustomImage 回退程序绘制，别让准星指向不存在的文件。
+    /// </summary>
+    private void DeleteCrosshairImage(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return;
+
+        try
+        {
+            string path = Path.Combine(AppPaths.CrosshairImageDir, SafeFileName(name));
+            if (!File.Exists(path)) return;
+            File.Delete(path);
+
+            if (_settings.Crosshair?.CustomImagePath != null &&
+                string.Equals(Path.GetFullPath(_settings.Crosshair.CustomImagePath),
+                    Path.GetFullPath(path), StringComparison.OrdinalIgnoreCase))
+            {
+                _settings.Crosshair.UseCustomImage = false;
+                _settings.Crosshair.CustomImagePath = null;
+                _settings.Save();
+                _crosshair?.Apply(_settings.Crosshair);
+                _hold?.Apply(_settings.Crosshair);
+                SendSettings();
+            }
+
+            SendCrosshairImages();
+        }
+        catch
+        {
+            // 文件被占用等删除失败：回推一次列表，让界面与磁盘实际状态对齐
+            SendCrosshairImages();
         }
     }
 
