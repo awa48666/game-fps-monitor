@@ -157,7 +157,36 @@ ipcMain.on('get-ws-port', (event) => {
 app.whenReady().then(() => {
   log('app ready');
   createWindow();
+  startMemorySampling();
 });
+
+// 诊断采样：每 5 分钟把各进程内存、堆、CPU 与窗口可见性写进 electron.log。
+// 宿主机任务管理器里 renderer 一度 1.8GB，但本地 Linux 复现不出增长，
+// 只能让宿主机自己"现场记录"：涨发生在什么时候、速率多大、和窗口可见
+// （vis/min/hid）是否相关。workingSetSize 仅 Windows 有值（KB），Linux 为
+// NaN，记 -1 即可，不影响其余字段。
+function startMemorySampling() {
+  const sample = () => {
+    try {
+      const vis = !mainWindow ? 'none'
+        : mainWindow.isMinimized() ? 'min'
+        : mainWindow.isVisible() ? 'vis' : 'hid';
+      const parts = app.getAppMetrics().map((m) => {
+        const ws = Number.isFinite(m.memory.workingSetSize)
+          ? Math.round(m.memory.workingSetSize / 1024) : -1;
+        const heap = m.memory.heapStatistics
+          ? Math.round(m.memory.heapStatistics.usedHeapSize / 1048576) : -1;
+        const cpu = Math.round((m.cpu && m.cpu.percentCPUUsage) || 0);
+        return `${m.type}(pid=${m.pid}) ws=${ws}MB heap=${heap}MB cpu=${cpu}%`;
+      });
+      log(`mem[win=${vis}] ${parts.join(' | ')}`);
+    } catch (err) {
+      log('mem 采样失败: ' + (err && err.message));
+    }
+  };
+  sample(); // 启动即记一条，方便核对格式
+  setInterval(sample, 5 * 60 * 1000);
+}
 
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
