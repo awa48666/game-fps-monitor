@@ -52,6 +52,13 @@
       </div>
     </div>
 
+    <div class="card">
+      <h3>监测目标白名单</h3>
+      <textarea id="s-targetWhitelist" class="text" rows="2" spellcheck="false"
+                placeholder="一行一个，如 cs2.exe、GTA5.exe；换行或逗号分隔，.exe 可省略"
+                style="width:100%;min-height:0"></textarea>
+    </div>
+
     <div class="grid-top">
       <div class="card fps-card">
         <div class="fps-value" id="fps">--</div>
@@ -527,20 +534,6 @@
           <option value="High">高</option>
         </select>
       </label>
-    </div>
-
-    <div class="card">
-      <h3>监测目标白名单</h3>
-      <label class="row" style="align-items: flex-start">
-        <span>进程名</span>
-        <textarea id="s-targetWhitelist" class="text" rows="4" spellcheck="false"
-                  placeholder="一行一个，例如：&#10;cs2.exe&#10;GTA5.exe&#10;eldenring"></textarea>
-      </label>
-      <p class="muted small">
-        名单里的进程一开始渲染就会自动成为监测目标，不用每次去监控页手动选。
-        换行、逗号、分号都能分隔，<code>.exe</code> 可省略。<br>
-        优先级：监控页手动选择的进程 &gt; 白名单 &gt; 自动检测前台渲染进程。
-      </p>
     </div>
 
     <div class="card">
