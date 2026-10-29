@@ -1,5 +1,7 @@
 $ErrorActionPreference = 'Continue'
-$root = 'C:\Users\awa486\Desktop\GameFPSMonitor'
+# Derive repo root from this script's location (script lives in <root>\docs\),
+# so it works on any machine regardless of the Windows user name.
+$root = Split-Path -Parent $PSScriptRoot
 
 # NOTE: keep this file pure ASCII (Windows PowerShell 5.1 reads scripts as ANSI).
 
