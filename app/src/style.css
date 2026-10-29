@@ -441,6 +441,11 @@ select.text option { background: var(--input-bg); color: var(--text); }
 .row.inline .gap { flex: 1 1 auto; min-width: 8px; }
 .row.inline select.text { width: auto; min-width: 150px; }
 
+/* 从属开关：缩进挂在总开关下面（「仅在检测到游戏时显示」挂在「启用悬浮窗」下），
+   总开关关闭时它被禁用、整行变灰 */
+.overlay-sub { padding-left: 26px; }
+.overlay-sub:has(input:disabled) { opacity: .45; cursor: default; }
+
 button.dragging {
   background: var(--accent);
   color: #04140d;

@@ -1894,6 +1894,12 @@ function applyTheme(theme, pushSettings) {
   pushSettings(true);
 }
 
+// 「仅在检测到游戏时显示」从属于「启用悬浮窗」：总开关关掉时它不可选
+function syncAutoShowGate() {
+  const master = $('s-overlayEnabled'), slave = $('s-autoShowOnGame');
+  if (master && slave) slave.disabled = !master.checked;
+}
+
 function fillSettings(s) {
   for (const [key, kind] of FIELDS) {
     const el = $('s-' + key);
@@ -1938,6 +1944,9 @@ function fillSettings(s) {
 
   // 手动目标的进程名不在 FIELDS 里，由监控页顶部下拉框承载
   syncRangeLabels();
+
+  // 从属开关的可用性跟随总开关当前值
+  syncAutoShowGate();
 
   // 准星页：控件回填 + 预览重绘
   fillCrosshair(s.crosshair);
@@ -2418,6 +2427,8 @@ function init() {
       if (kind === 'range') syncRangeLabels();
       // 开关一变，网格提示里的「未生效」字样要跟着变
       if (key === 'usePresetStyle') refreshGridHint();
+      // 总开关变了，从属开关的可用性跟着变
+      if (key === 'overlayEnabled') syncAutoShowGate();
       // 滑块/颜色拖动用防抖，勾选框和数字框立即生效
       pushSettings(kind === 'checkbox');
     });
