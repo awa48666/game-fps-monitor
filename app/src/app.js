@@ -2466,6 +2466,26 @@ function init() {
     setTimeout(() => { hint.textContent = ''; }, 1800);
   });
 
+  // 白名单：从磁盘选游戏的 exe，把进程名追加进名单（已在名单里就不重复加）
+  const wlExeFile = $('wl-exe-file');
+  const btnWlPickExe = $('btn-wl-pick-exe');
+  if (btnWlPickExe && wlExeFile) {
+    btnWlPickExe.addEventListener('click', () => wlExeFile.click());
+    wlExeFile.addEventListener('change', () => {
+      const f = wlExeFile.files && wlExeFile.files[0];
+      wlExeFile.value = '';        // 允许连续选同一个文件
+      if (!f || !f.name) return;
+      const ta = $('s-targetWhitelist');
+      if (!ta) return;
+      const bare = (s) => s.replace(/\.exe$/i, '').toLowerCase();
+      const items = ta.value.split(/[\n,;|]/).map((s) => s.trim()).filter(Boolean);
+      if (items.some((s) => bare(s) === bare(f.name))) return;
+      items.push(f.name);
+      ta.value = items.join('\n');
+      pushSettings(true);          // 立即下发，白名单马上生效
+    });
+  }
+
   // 热键录制：点输入框后直接按组合键
   setupHotkeyRecorder($('s-hotkeyToggleOverlay'), pushSettings);
   setupHotkeyRecorder($('s-hotkeyOpenMain'), pushSettings);

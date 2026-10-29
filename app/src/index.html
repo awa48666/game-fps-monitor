@@ -53,10 +53,16 @@
     </div>
 
     <div class="card">
-      <h3>监测目标白名单</h3>
+      <div class="card-head">
+        <h3>监测目标白名单</h3>
+        <div class="card-head-actions">
+          <button id="btn-wl-pick-exe" class="mini" title="从磁盘选择游戏的 exe，把它的进程名加进名单">选择进程文件…</button>
+        </div>
+      </div>
       <textarea id="s-targetWhitelist" class="text" rows="2" spellcheck="false"
                 placeholder="一行一个，如 cs2.exe、GTA5.exe；换行或逗号分隔，.exe 可省略"
                 style="width:100%;min-height:0"></textarea>
+      <input type="file" id="wl-exe-file" accept=".exe" hidden>
     </div>
 
     <div class="grid-top">
