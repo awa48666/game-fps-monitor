@@ -185,6 +185,7 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent);
 .num { width: 84px; }
 .text { flex: 1; }
 .text.mono { font-family: var(--mono); }
+textarea.text { resize: vertical; min-height: 84px; line-height: 1.55; }
 input[type="range"] { flex: 1; accent-color: var(--accent); max-width: 260px; }
 input[type="color"] {
   width: 42px; height: 30px; padding: 2px; border: 1px solid var(--line);

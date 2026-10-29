@@ -150,6 +150,33 @@ function setBar(name, pct, label) {
   if (label !== undefined) setText(name + '-val', label);
 }
 
+/** 把一次绘制排到下一帧；同一帧内到达的多条快照合并成一次绘制。 */
+let drawQueued = false;
+
+/**
+ * 图表绘制的唯一入口。
+ * 1) 合并：一帧内到达多条 snapshot 只画一次（后端 200ms 一条，合并后不额外增加负担）。
+ * 2) 不可见不画：窗口被隐藏 / 最小化时直接跳过，回到可见时补画一次最新数据。
+ *    这样"窗口重新出现"时永远只呈现一帧最新状态，不会把不在前台期间的消息逐条回放成动画。
+ */
+function scheduleDraw() {
+  if (document.hidden || drawQueued) return;
+  drawQueued = true;
+  requestAnimationFrame(() => {
+    drawQueued = false;
+    if (document.hidden) return;
+    const s = latest || {};
+    drawChart(s.recentFrameTimes || [], s.low1PercentHistory || [], s.low01PercentHistory || []);
+    drawFrameTimeChart(s.recentFrameTimes || []);
+  });
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  drawQueued = false;   // 隐藏期间 rAF 被挂起，可能留下未执行的排队标记
+  scheduleDraw();
+});
+
 function render(s) {
   setText('game-name', s.gameName || '等待游戏运行…');
   setText('game-pid', s.gamePid ? 'PID ' + s.gamePid : '');
@@ -207,8 +234,7 @@ function render(s) {
     delete errBox.dataset.shown;
   }
 
-  drawChart(s.recentFrameTimes || [], s.low1PercentHistory || [], s.low01PercentHistory || []);
-  drawFrameTimeChart(s.recentFrameTimes || []);
+  scheduleDraw();
 
   const sess = $('session-info');
   if (sess) {
@@ -605,6 +631,9 @@ function drawDetailChart(data) {
 
 /* ===================== 帧率曲线 ===================== */
 
+/** 1% / 0.1% Low 曲线的时间跨度（秒）。后端每秒一个点，最多保留 180 点。 */
+const LOW_CHART_SECONDS = 60;
+
 function drawChart(frameTimes, low1History, low01History) {
   const canvas = $('chart');
   if (!canvas) return;
@@ -679,14 +708,20 @@ function drawChart(frameTimes, low1History, low01History) {
   ctx.lineJoin = 'round';
   ctx.stroke();
 
-  // ---- 1% / 0.1% Low 曲线（每秒一个点，铺满整个宽度）----
+  // ---- 1% / 0.1% Low 曲线 ----
+  // 后端每秒采一个点（最多 180 点）。这里按固定的 60 秒时间轴左对齐绘制：
+  // 曲线只会随时间向右生长、满了以后整体左滚，已经画出的那段不会被横向重排。
+  // 若按 series.length 归一化，点数一变（尤其关掉窗口一段时间再打开，点数从几十
+  // 跳到一百多）整条曲线就会被瞬间压缩重画，看起来就像"在快速回放数据"。
+  const LOW_SPAN = LOW_CHART_SECONDS;
   const drawLow = (series, color) => {
     if (!series || series.length < 2) return;
-    const m = series.length;
+    const m = Math.min(series.length, LOW_SPAN);
+    const start = series.length - m;
     ctx.beginPath();
     for (let i = 0; i < m; i++) {
-      const x = padL + (w * i) / (m - 1);
-      const y = yAt(series[i]);
+      const x = padL + (w * i) / (LOW_SPAN - 1);
+      const y = yAt(series[start + i]);
       if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
     }
     ctx.strokeStyle = color;
@@ -1819,6 +1854,7 @@ const FIELDS = [
   ['writeFrameCsv', 'checkbox'],
   ['sessionIdleSeconds', 'number'],
   ['maxSessionsInHistory', 'number'],
+  ['targetWhitelist', 'text'],
   ['priorityClass', 'text'],
   ['uiTheme', 'text'],
   ['cpuUsageMetric', 'text'],
@@ -2643,9 +2679,7 @@ function init() {
   if (uiThemeSel) {
     uiThemeSel.addEventListener('change', () => {
       applyUiTheme(uiThemeSel.value);
-      const s = latest || {};
-      drawChart(s.recentFrameTimes || [], s.low1PercentHistory || [], s.low01PercentHistory || []);
-      drawFrameTimeChart(s.recentFrameTimes || []);
+      scheduleDraw();
       pushSettings(true);
     });
   }
@@ -2672,9 +2706,7 @@ function init() {
   }
 
   window.addEventListener('resize', () => {
-    const s = latest || {};
-    drawChart(s.recentFrameTimes || [], s.low1PercentHistory || [], s.low01PercentHistory || []);
-    drawFrameTimeChart(s.recentFrameTimes || []);
+    scheduleDraw();
     drawCrosshairPreview();
   });
 

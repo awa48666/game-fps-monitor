@@ -195,6 +195,7 @@ public sealed class AppHost : IDisposable
         _engine.MaxSessionsInHistory = _settings.MaxSessionsInHistory;
         _engine.ManualTargetEnabled = _settings.ManualTargetEnabled;
         _engine.ManualTargetName = _settings.ManualTargetName;
+        _engine.TargetWhitelist = _settings.TargetWhitelist;
         _engine.SetCpuUsageMetric(_settings.CpuUsageMetric);
     }
 

@@ -155,6 +155,12 @@ public sealed class OverlaySettings
     /// <summary>手动指定的进程名（可带或省略 .exe）。</summary>
     public string ManualTargetName { get; set; } = "";
 
+    /// <summary>
+    /// 监测目标白名单：进程名，换行 / 逗号 / 分号 / 竖线分隔，可带或省略 .exe。
+    /// 名单里的进程一开始渲染就自动成为监测目标，不必每次在监控页手动选。
+    /// </summary>
+    public string TargetWhitelist { get; set; } = "";
+
     // ---- 游戏记录 ----
     /// <summary>游戏退出时自动保存并记录本场帧率数据。</summary>
     public bool RecordSessions { get; set; } = true;

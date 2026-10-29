@@ -178,6 +178,26 @@ public sealed class MonitorEngine : IDisposable
     public bool IsElevated => EtwFrameCapture.IsElevated;
     public string? StartError { get; private set; }
 
+    // ---- 监测目标白名单 ----
+    private string _targetWhitelist = "";
+    private int _whitelistPid;
+
+    /// <summary>
+    /// 监测目标白名单：填进程名（换行 / 逗号 / 分号 / 竖线分隔，可带或省略 .exe）。
+    /// 名单里的进程一提交帧就直接成为监测目标，不必每次手动选择。
+    /// 优先级：手动锁定 &gt; 白名单 &gt; 自动检测。
+    /// </summary>
+    public string TargetWhitelist
+    {
+        get => _targetWhitelist;
+        set
+        {
+            if (_targetWhitelist == value) return;
+            _targetWhitelist = value ?? "";
+            _whitelistPid = 0;
+        }
+    }
+
     /// <summary>
     /// 切换 CPU 占用率口径："utility"（任务管理器口径）或其他值（time，纯时间占比）。
     /// 转发给 HardwareMonitor；口径没变时内部不会重建计数器。
@@ -494,6 +514,69 @@ public sealed class MonitorEngine : IDisposable
         return 0;
     }
 
+    /// <summary>
+    /// 解析白名单里"正在渲染"的那个进程。
+    /// 只认已经在提交帧的进程——名单里的程序还没启动（或只是常驻后台不渲染）时
+    /// 返回 0，让自动检测继续工作，不会把 FPS 卡在 0 上。
+    /// </summary>
+    private int ResolveWhitelistTarget(double now)
+    {
+        var names = ParseWhitelist();
+        if (names.Count == 0)
+        {
+            _whitelistPid = 0;
+            return 0;
+        }
+
+        // 上次命中的进程还在渲染就继续跟，省掉每 tick 的遍历
+        if (_whitelistPid > 0)
+        {
+            if (_lastFrameTs.TryGetValue(_whitelistPid, out var ts) && (now <= 0 || now - ts <= 1500))
+                return _whitelistPid;
+            _whitelistPid = 0;
+        }
+
+        // 同时命中多个（多进程游戏）时取帧率最高的那个，通常是真正渲染的主进程
+        int best = 0;
+        double bestFps = -1;
+        foreach (var kv in _lastFrameTs)
+        {
+            if (now > 0 && now - kv.Value > 1500) continue;
+            if (IsSelfProcess(kv.Key)) continue;
+
+            string name = ProcessUtil.GetProcessName(kv.Key);
+            bool hit = false;
+            foreach (var n in names)
+            {
+                if (string.Equals(n, name, StringComparison.OrdinalIgnoreCase)) { hit = true; break; }
+            }
+            if (!hit) continue;
+
+            double fps = _stats.TryGetValue(kv.Key, out var st) ? st.Snapshot().Fps : 0;
+            if (fps > bestFps) { bestFps = fps; best = kv.Key; }
+        }
+
+        if (best > 0) _whitelistPid = best;
+        return best;
+    }
+
+    private static readonly char[] WhitelistSeparators = { '\n', '\r', ',', ';', '|', '\t' };
+
+    private List<string> ParseWhitelist()
+    {
+        var list = new List<string>();
+        if (string.IsNullOrWhiteSpace(_targetWhitelist)) return list;
+
+        foreach (var raw in _targetWhitelist.Split(WhitelistSeparators, StringSplitOptions.RemoveEmptyEntries))
+        {
+            string n = raw.Trim();
+            if (n.Length == 0) continue;
+            if (n.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) n = n[..^4];
+            if (n.Length > 0) list.Add(n);
+        }
+        return list;
+    }
+
     /// <summary>当前正在渲染的进程列表，供界面手动选择。</summary>
     public List<ProcessCandidate> GetCandidates()
     {
@@ -560,6 +643,10 @@ public sealed class MonitorEngine : IDisposable
     {
         // 手动指定了目标就完全跳过自动检测
         if (ManualTargetEnabled) return ResolveManualTarget();
+
+        // 白名单命中就锁它：这比自己猜"哪个进程像游戏"可靠得多
+        int whitelisted = ResolveWhitelistTarget(now);
+        if (whitelisted > 0) return whitelisted;
 
         if (_stats.IsEmpty) return 0;
 
