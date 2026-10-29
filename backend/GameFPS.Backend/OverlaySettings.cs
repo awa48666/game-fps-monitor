@@ -41,8 +41,11 @@ public sealed class OverlaySettings
     /// </summary>
     public bool? UsePresetStyle { get; set; }
 
-    /// <summary>检测到游戏时自动显示悬浮窗。</summary>
-    public bool AutoShowOnGame { get; set; } = true;
+    /// <summary>
+    /// 仅在检测到游戏时显示悬浮窗。默认关闭：悬浮窗开关打开就常显，
+    /// 没有监测目标时显示 "--" 占位（v1.0.32 起；想要原行为可勾选本项）。
+    /// </summary>
+    public bool AutoShowOnGame { get; set; } = false;
     public int X { get; set; } = 24;
     public int Y { get; set; } = 24;
     public double Scale { get; set; } = 1.0;
