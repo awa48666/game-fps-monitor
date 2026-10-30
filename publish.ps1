@@ -9,7 +9,10 @@
     what gets zipped and uploaded as a Release asset, so a build that silently
     dropped the .NET runtime would ship a package strangers cannot start. The
     final verify step below fails the build if the output no longer matches a
-    release shape.
+    release shape. It also deletes runtime logs left behind by running the app
+    (electron.log / hotkey.log / session-debug.log / crosshair.log) and then
+    proves the code files are byte-identical to the repo copy: "same as the
+    release" means the CODE matches, not that the two file trees are equal.
 
     Output: dist\GameFPS\   -> double click GameFPS.exe (one UAC prompt)
     Keep this file pure ASCII: Windows PowerShell 5.1 decodes scripts as ANSI.
@@ -106,6 +109,11 @@ Get-ChildItem $OutputDir -Directory -ErrorAction SilentlyContinue | Where-Object
 # A release must be runnable on a machine that never installed .NET, so the
 # output is checked against the same file set a Release asset is expected to
 # carry. Fail loudly here instead of discovering it from a stranger's bug report.
+# Note: the output dir is deleted and rebuilt at the top of this script, so any
+# runtime log (electron.log / hotkey.log / session-debug.log) can only appear
+# AFTER a build, by running the app out of that dir. Those are removed by
+# docs\sanitize-artifact.ps1, which is what to run right before you hand a
+# directory over as the deliverable.
 Write-Host '==> [6/6] verify release shape'
 $must = @(
     'GameFPS.exe',
@@ -132,6 +140,11 @@ if ($missing.Count -gt 0) {
     Write-Host ('    MISSING: ' + ($missing -join ', '))
     throw 'output does not match release shape (see MISSING list above)'
 }
+
+# Drop runtime leftovers and prove the shipped code files match the repo. One
+# implementation lives in docs\sanitize-artifact.ps1 so a hand-copied artifact
+# dir and a freshly built one are checked the same way.
+& (Join-Path $PSScriptRoot 'docs\sanitize-artifact.ps1') -OutputDir $OutputDir
 
 $size = (Get-ChildItem $OutputDir -Recurse -File | Measure-Object Length -Sum).Sum / 1MB
 # A self-contained build is ~403 MB. Anything well under that means the runtime
