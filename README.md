@@ -50,6 +50,7 @@ WinForms 设计器、调试符号读取器、非中文卫星资源等），共�
 <details>
 <summary>版本历史</summary>
 
+- **v1.0.35** — 打包脚本默认改为**自包含**（此前不传 `-SelfContained` 会静默产出框架依赖包，本机能跑但别人下回去起不来），并新增产物形状自检：必需文件缺失或自包含体积异常直接失败；反向新增 `-FrameworkDependent` 供本机快速验证
 - **v1.0.34** — 白名单标题旁新增「选择进程文件…」：从磁盘选游戏的 exe，进程名自动追加进名单（去重、立即生效），与准星选图同款文件选择器
 - **v1.0.33** — 「仅在检测到游戏时显示」移到「启用悬浮窗」正下方并建立从属关系：总开关关闭时它禁用变灰，勾上总开关才能选
 - **v1.0.32** — 悬浮窗常显：自动检测没锁定到监测进程时也显示（FPS 等项显示 `--` 占位），不再整个消失；「仅在检测到游戏时显示」开关默认改为关闭并迁移已有设置，想要原行为仍可勾选
@@ -108,16 +109,21 @@ WinForms 设计器、调试符号读取器、非中文卫星资源等），共�
 cd app
 npm install          # 或 pnpm install
 
-# 打包（默认框架依赖，体积小；加 -SelfContained 则内置运行时）
+# 打包（默认自包含：产物形状与 GitHub Release 一致）
 cd ..
-.\publish.ps1 -SelfContained
+.\publish.ps1
+
+# 只为本机快速验证，愿意接受目标机需自带 .NET 10 桌面运行时
+.\publish.ps1 -FrameworkDependent
 
 # 产物在 dist\GameFPS\，双击 GameFPS.exe 运行
 ```
 
-`publish.ps1` 会做四件事：publish C# 后端 → 拷贝前端 → 拷贝 Electron 运行时 → 裁剪语言包。
+`publish.ps1` 会做五件事：publish C# 后端 → 拷贝前端 → 拷贝 Electron 运行时 → 裁剪语言包与冗余文件 → 校验产物形状。
 
-**在 Linux 上交叉打包**（不需要 Windows 机器，产物与 `publish.ps1 -SelfContained` 等价）：
+最后一步是硬性自检：必需文件（.NET 运行时、Electron 引擎、`resources\default_app.asar` 等）缺失，或自包含产物体积明显不对，脚本直接失败退出。目的只有一个——**`产物` 目录里的东西必须和 Release 包里的东西一致**，发布用的就是这份目录压出来的包，不允许出现「本机能跑、别人下回去起不来」。
+
+**在 Linux 上交叉打包**（不需要 Windows 机器，产物与默认 `publish.ps1` 等价）：
 
 ```bash
 scripts/pack-linux.sh                # 产物在 .build/GameFPS/
@@ -428,11 +434,11 @@ GameFPSMonitor/
 cd backend\GameFPS.Backend
 dotnet build -c Release
 
-# 打包（框架依赖，需 .NET 10 Desktop Runtime）
+# 打包（默认自包含，免装运行时；产物与 Release 包同形状）
 .\publish.ps1
 
-# 打包（自包含，免装运行时，体积 +数百 MB）
-.\publish.ps1 -SelfContained
+# 只为本机验证，产物更小但需要目标机自带 .NET 10 Desktop Runtime
+.\publish.ps1 -FrameworkDependent
 ```
 
 > `publish.ps1` 必须保持**纯 ASCII**：Windows PowerShell 5.1 会按 ANSI 解码脚本文件，
