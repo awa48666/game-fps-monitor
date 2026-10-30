@@ -1310,7 +1310,7 @@ function pickCxImage(file) {
     if (nameEl) nameEl.textContent = file.name;
 
     // 原始大图不该一导入就被压小：图片原始短边比当前尺寸大时，
-    // 自动把尺寸升到 1:1（≤512），换大图第一眼就是原大小
+    // 自动把尺寸升到 1:1（≤1024），换大图第一眼就是原大小
     const probe = new Image();
     probe.onload = () => {
       const native = Math.round(Math.min(probe.naturalWidth || 0, probe.naturalHeight || 0));
@@ -1329,7 +1329,7 @@ function pickCxImage(file) {
 }
 
 /**
- * 把图片交给后端：后端解码后写到 %LOCALAPPDATA%\GameFPS\crosshair\，
+ * 把图片交给后端：后端解码后写到 %LOCALAPPDATA%\GameFPSMonitor\crosshair\，
  * 再把 UseCustomImage / CustomImagePath 写进设置并回推 —— 前端不直接碰磁盘。
  */
 async function sendCxImage(name, dataUrl) {
